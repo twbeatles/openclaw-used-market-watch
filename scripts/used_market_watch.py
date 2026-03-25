@@ -175,6 +175,19 @@ def _store_last_seen(last_seen: dict[str, Any], rule: dict[str, Any], item: dict
     }
 
 
+def _dedupe_watch_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    seen_keys: set[str] = set()
+    for item in items:
+        article_key = item.get("article_key")
+        dedupe_key = article_key or json.dumps(item, ensure_ascii=False, sort_keys=True)
+        if dedupe_key in seen_keys:
+            continue
+        seen_keys.add(dedupe_key)
+        deduped.append(item)
+    return deduped
+
+
 def cmd_watch_check(args: argparse.Namespace) -> int:
     state = load_state()
     rules = state.get("rules") or []
@@ -193,7 +206,7 @@ def cmd_watch_check(args: argparse.Namespace) -> int:
             intent.min_price = rule["min_price"]
         if rule.get("max_price"):
             intent.max_price = rule["max_price"]
-        items = [item.to_dict() for item in search_markets(intent)]
+        items = _dedupe_watch_items([item.to_dict() for item in search_markets(intent)])
         matched = []
         known = {row.get('dedupe_key') for row in state.get('events', [])[-500:]}
         for item in items:
