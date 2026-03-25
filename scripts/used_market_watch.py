@@ -155,6 +155,26 @@ def _make_alert(rule: dict[str, Any], item: dict[str, Any], event_type: str, pre
     }
 
 
+def _last_seen_key(rule: dict[str, Any], article_key: str) -> str:
+    return f"{rule['id']}::{article_key}"
+
+
+def _get_previous_seen(last_seen: dict[str, Any], rule: dict[str, Any], article_key: str) -> dict[str, Any] | None:
+    scoped_key = _last_seen_key(rule, article_key)
+    return last_seen.get(scoped_key) or last_seen.get(article_key)
+
+
+def _store_last_seen(last_seen: dict[str, Any], rule: dict[str, Any], item: dict[str, Any], checked_at: int) -> None:
+    last_seen[_last_seen_key(rule, item["article_key"])] = {
+        "rule_id": rule["id"],
+        "price_text": item.get("price_text"),
+        "price_numeric": item.get("price_numeric"),
+        "title": item.get("title"),
+        "link": item.get("link"),
+        "last_seen_at": checked_at,
+    }
+
+
 def cmd_watch_check(args: argparse.Namespace) -> int:
     state = load_state()
     rules = state.get("rules") or []
@@ -177,7 +197,7 @@ def cmd_watch_check(args: argparse.Namespace) -> int:
         matched = []
         known = {row.get('dedupe_key') for row in state.get('events', [])[-500:]}
         for item in items:
-            prev = last_seen.get(item["article_key"])
+            prev = _get_previous_seen(last_seen, rule, item["article_key"])
             is_new = prev is None
             is_price_drop = bool(prev and prev.get("price_numeric") and item.get("price_numeric") and item["price_numeric"] < prev["price_numeric"])
             event_type = None
@@ -192,14 +212,7 @@ def cmd_watch_check(args: argparse.Namespace) -> int:
                 if dedupe_key not in known:
                     known.add(dedupe_key)
                     new_events.append({"dedupe_key": dedupe_key, **alert})
-            last_seen[item["article_key"]] = {
-                "rule_id": rule["id"],
-                "price_text": item.get("price_text"),
-                "price_numeric": item.get("price_numeric"),
-                "title": item.get("title"),
-                "link": item.get("link"),
-                "last_seen_at": checked_at,
-            }
+            _store_last_seen(last_seen, rule, item, checked_at)
         alerts.append({
             "rule": rule,
             "matched_count": len(matched),

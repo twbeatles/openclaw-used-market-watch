@@ -4,7 +4,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 from output_utils import render_integration_plan, render_watch_plan
-from used_market_watch import _event_counts, _make_alert, _summarize
+from used_market_watch import _event_counts, _get_previous_seen, _last_seen_key, _make_alert, _store_last_seen, _summarize
 
 
 def test_summarize_by_market():
@@ -42,6 +42,35 @@ def test_event_counts_groups_by_type():
         {"event_type": "new_listing"},
     ])
     assert counts == {"new_listing": 2, "price_drop": 1}
+
+
+def test_last_seen_is_scoped_per_rule():
+    last_seen = {}
+    first_rule = {"id": "rule-1", "name": "아이폰 신규"}
+    second_rule = {"id": "rule-2", "name": "아이폰 하락"}
+    item = {
+        "article_key": "danggeun:123",
+        "title": "아이폰 15 프로",
+        "price_text": "1,000,000원",
+        "price_numeric": 1000000,
+        "link": "https://example.com/123",
+    }
+
+    _store_last_seen(last_seen, first_rule, item, checked_at=1234567890)
+
+    assert _last_seen_key(first_rule, item["article_key"]) in last_seen
+    assert _get_previous_seen(last_seen, first_rule, item["article_key"])
+    assert _get_previous_seen(last_seen, second_rule, item["article_key"]) is None
+
+
+def test_last_seen_falls_back_to_legacy_unscoped_key():
+    rule = {"id": "rule-1", "name": "아이폰 감시"}
+    article_key = "danggeun:123"
+    legacy = {article_key: {"price_numeric": 900000, "price_text": "900,000원"}}
+
+    prev = _get_previous_seen(legacy, rule, article_key)
+
+    assert prev == legacy[article_key]
 
 
 def test_render_watch_plan_includes_schedule_and_cron_hint():
