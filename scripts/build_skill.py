@@ -24,7 +24,7 @@ def main() -> int:
     out_path = DIST_DIR / "used-market-watch.skill"
     manifest = {
         "name": "used-market-watch",
-        "version": "0.2.0",
+        "version": "0.4.0",
         "entry": "SKILL.md",
     }
     with ZipFile(out_path, "w", compression=ZIP_DEFLATED) as zf:

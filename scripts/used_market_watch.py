@@ -9,6 +9,7 @@ from typing import Any
 from market_client import search_markets
 from models import MARKET_LABELS
 from output_utils import (
+    render_integration_plan,
     render_search_text,
     render_watch_events,
     render_watch_list,
@@ -16,7 +17,7 @@ from output_utils import (
     render_watch_preview,
 )
 from query_parser import parse_search_intent
-from watch_intent import parse_watch_request
+from watch_intent import build_integration_bundle, parse_watch_request
 from watch_store import (
     find_rule,
     load_state,
@@ -109,6 +110,19 @@ def cmd_watch_upsert(args: argparse.Namespace) -> int:
         status = "등록" if created else "업데이트"
         print(render_watch_plan({"rule": rule, "intent": plan["intent"]}))
         print(f"\n{status} 완료")
+    return 0
+
+
+def cmd_integration_plan(args: argparse.Namespace) -> int:
+    bundle = build_integration_bundle(args.request, default_limit=args.limit)
+    if args.persist:
+        state = load_state()
+        rule, created = upsert_rule(state, bundle["parsed_plan"])
+        save_state(state)
+        bundle["persist"]["saved"] = True
+        bundle["persist"]["created"] = created
+        bundle["persist"]["rule"] = rule
+    print(json.dumps(bundle, ensure_ascii=False, indent=2) if args.json else render_integration_plan(bundle))
     return 0
 
 
@@ -292,6 +306,13 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--limit", type=int, default=12)
     x.add_argument("--json", action="store_true")
     x.set_defaults(func=cmd_watch_upsert)
+
+    x = sub.add_parser("integration-plan")
+    x.add_argument("request")
+    x.add_argument("--limit", type=int, default=12)
+    x.add_argument("--persist", action="store_true")
+    x.add_argument("--json", action="store_true")
+    x.set_defaults(func=cmd_integration_plan)
 
     x = sub.add_parser("watch-list")
     x.add_argument("--json", action="store_true")

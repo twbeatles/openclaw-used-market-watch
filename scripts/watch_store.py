@@ -7,7 +7,15 @@ from typing import Any
 
 from _paths import WATCH_STATE_FILE
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+
+
+def _normalize_rule(rule: dict[str, Any]) -> dict[str, Any]:
+    rule.setdefault("delivery_mode", "alert")
+    rule.setdefault("action", "watch")
+    rule.setdefault("schedule", {"kind": "manual", "label": "수동 또는 상위 스케줄러 연결 필요", "cron": None})
+    rule.setdefault("plan_hints", {})
+    return rule
 
 
 def load_state() -> dict[str, Any]:
@@ -19,6 +27,7 @@ def load_state() -> dict[str, Any]:
             data.setdefault("events", [])
             data.setdefault("last_seen", {})
             data.setdefault("last_checked_at", None)
+            data["rules"] = [_normalize_rule(rule) for rule in (data.get("rules") or [])]
             return data
     return {"schema_version": SCHEMA_VERSION, "rules": [], "events": [], "last_seen": {}, "last_checked_at": None}
 
@@ -28,7 +37,7 @@ def save_state(data: dict[str, Any]) -> None:
     WATCH_STATE_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def make_rule(*, name: str, query: str, limit: int, min_price: int | None, max_price: int | None, notify_on_new: bool, notify_on_price_drop: bool) -> dict[str, Any]:
+def make_rule(*, name: str, query: str, limit: int, min_price: int | None, max_price: int | None, notify_on_new: bool, notify_on_price_drop: bool, enabled: bool = True, delivery_mode: str = "alert", action: str = "watch", schedule: dict[str, Any] | None = None, plan_hints: dict[str, Any] | None = None) -> dict[str, Any]:
     now = int(time.time())
     return {
         "id": f"rule-{uuid.uuid4().hex[:10]}",
@@ -39,7 +48,11 @@ def make_rule(*, name: str, query: str, limit: int, min_price: int | None, max_p
         "max_price": max_price,
         "notify_on_new": bool(notify_on_new),
         "notify_on_price_drop": bool(notify_on_price_drop),
-        "enabled": True,
+        "enabled": bool(enabled),
+        "delivery_mode": delivery_mode,
+        "action": action,
+        "schedule": schedule or {"kind": "manual", "label": "수동 또는 상위 스케줄러 연결 필요", "cron": None},
+        "plan_hints": plan_hints or {},
         "created_at": now,
         "updated_at": now,
     }
@@ -65,10 +78,14 @@ def upsert_rule(state: dict[str, Any], rule_data: dict[str, Any]) -> tuple[dict[
                 "notify_on_new": bool(rule_data.get("notify_on_new")),
                 "notify_on_price_drop": bool(rule_data.get("notify_on_price_drop")),
                 "enabled": bool(rule_data.get("enabled", True)),
+                "delivery_mode": rule_data.get("delivery_mode") or existing.get("delivery_mode") or "alert",
+                "action": rule_data.get("action") or existing.get("action") or "watch",
+                "schedule": rule_data.get("schedule") or existing.get("schedule") or {"kind": "manual", "label": "수동 또는 상위 스케줄러 연결 필요", "cron": None},
+                "plan_hints": rule_data.get("plan_hints") or existing.get("plan_hints") or {},
                 "updated_at": now,
             }
         )
-        return existing, False
+        return _normalize_rule(existing), False
     rule = make_rule(
         name=rule_data["name"],
         query=rule_data["query"],
@@ -77,10 +94,14 @@ def upsert_rule(state: dict[str, Any], rule_data: dict[str, Any]) -> tuple[dict[
         max_price=rule_data.get("max_price"),
         notify_on_new=bool(rule_data.get("notify_on_new")),
         notify_on_price_drop=bool(rule_data.get("notify_on_price_drop")),
+        enabled=bool(rule_data.get("enabled", True)),
+        delivery_mode=rule_data.get("delivery_mode") or "alert",
+        action=rule_data.get("action") or "watch",
+        schedule=rule_data.get("schedule"),
+        plan_hints=rule_data.get("plan_hints"),
     )
-    rule["enabled"] = bool(rule_data.get("enabled", True))
     state.setdefault("rules", []).append(rule)
-    return rule, True
+    return _normalize_rule(rule), True
 
 
 def set_rule_enabled(state: dict[str, Any], name_or_id: str, enabled: bool) -> dict[str, Any] | None:

@@ -19,9 +19,9 @@ LOCATION_HINTS = (
 )
 
 STOPWORDS = {
-    "찾아줘", "찾아", "브리핑", "알려줘", "모니터링", "감시", "매물", "중고", "중고매물",
+    "찾아줘", "찾아", "브리핑", "브리핑해줘", "알려줘", "모니터링", "감시", "감시해줘", "매물", "중고", "중고매물",
     "신규", "신규만", "새매물", "새매물만", "가격하락", "가격하락만", "가격", "제품", "거래", "검색",
-    "해줘", "켜줘", "추가", "저장", "등록", "설정", "만", "위주", "만요",
+    "해줘", "켜줘", "추가", "저장", "등록", "설정", "만", "위주", "만요", "내려가면", "떨어지면", "매일", "아침", "오전", "오후", "저녁", "밤",
 }
 
 
@@ -86,6 +86,8 @@ def _clean_tokens(tokens: Iterable[str], *, excludes: list[str], markets: list[s
         if re.fullmatch(r"\d+(?:개|건)?", token):
             continue
         if re.fullmatch(r"\d+[만천원]*", token):
+            continue
+        if re.fullmatch(r"\d{1,2}시(?:에)?|\d{1,2}:\d{2}", token):
             continue
         out.append(token)
     return list(dict.fromkeys(out))
