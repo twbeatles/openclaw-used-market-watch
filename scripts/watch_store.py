@@ -43,3 +43,58 @@ def make_rule(*, name: str, query: str, limit: int, min_price: int | None, max_p
         "created_at": now,
         "updated_at": now,
     }
+
+
+def find_rule(state: dict[str, Any], name_or_id: str) -> dict[str, Any] | None:
+    for rule in state.get("rules") or []:
+        if rule.get("id") == name_or_id or rule.get("name") == name_or_id:
+            return rule
+    return None
+
+
+def upsert_rule(state: dict[str, Any], rule_data: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    now = int(time.time())
+    existing = find_rule(state, rule_data["name"])
+    if existing:
+        existing.update(
+            {
+                "query": rule_data["query"],
+                "limit": int(rule_data.get("limit") or existing.get("limit") or 12),
+                "min_price": rule_data.get("min_price"),
+                "max_price": rule_data.get("max_price"),
+                "notify_on_new": bool(rule_data.get("notify_on_new")),
+                "notify_on_price_drop": bool(rule_data.get("notify_on_price_drop")),
+                "enabled": bool(rule_data.get("enabled", True)),
+                "updated_at": now,
+            }
+        )
+        return existing, False
+    rule = make_rule(
+        name=rule_data["name"],
+        query=rule_data["query"],
+        limit=int(rule_data.get("limit") or 12),
+        min_price=rule_data.get("min_price"),
+        max_price=rule_data.get("max_price"),
+        notify_on_new=bool(rule_data.get("notify_on_new")),
+        notify_on_price_drop=bool(rule_data.get("notify_on_price_drop")),
+    )
+    rule["enabled"] = bool(rule_data.get("enabled", True))
+    state.setdefault("rules", []).append(rule)
+    return rule, True
+
+
+def set_rule_enabled(state: dict[str, Any], name_or_id: str, enabled: bool) -> dict[str, Any] | None:
+    rule = find_rule(state, name_or_id)
+    if not rule:
+        return None
+    rule["enabled"] = bool(enabled)
+    rule["updated_at"] = int(time.time())
+    return rule
+
+
+def remove_rule(state: dict[str, Any], name_or_id: str) -> dict[str, Any] | None:
+    rules = state.get("rules") or []
+    for idx, rule in enumerate(rules):
+        if rule.get("id") == name_or_id or rule.get("name") == name_or_id:
+            return rules.pop(idx)
+    return None

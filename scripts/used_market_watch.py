@@ -8,9 +8,24 @@ from typing import Any
 
 from market_client import search_markets
 from models import MARKET_LABELS
-from output_utils import render_search_text, render_watch_preview
+from output_utils import (
+    render_search_text,
+    render_watch_events,
+    render_watch_list,
+    render_watch_plan,
+    render_watch_preview,
+)
 from query_parser import parse_search_intent
-from watch_store import load_state, make_rule, save_state
+from watch_intent import parse_watch_request
+from watch_store import (
+    find_rule,
+    load_state,
+    make_rule,
+    remove_rule,
+    save_state,
+    set_rule_enabled,
+    upsert_rule,
+)
 
 
 def _summarize(items: list[dict[str, Any]]) -> dict[str, Any]:
@@ -31,6 +46,15 @@ def _summarize(items: list[dict[str, Any]]) -> dict[str, Any]:
     return out
 
 
+def _event_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        kind = row.get("event_type")
+        if kind:
+            counts[kind] = counts.get(kind, 0) + 1
+    return counts
+
+
 def run_search(query: str, *, limit: int, as_json: bool) -> int:
     intent = parse_search_intent(query, limit=limit)
     items = [item.to_dict() for item in search_markets(intent)]
@@ -47,6 +71,13 @@ def cmd_parse(args: argparse.Namespace) -> int:
 
 def cmd_search(args: argparse.Namespace) -> int:
     return run_search(args.query, limit=args.limit, as_json=args.json)
+
+
+def cmd_watch_plan(args: argparse.Namespace) -> int:
+    plan = parse_watch_request(args.request, default_limit=args.limit)
+    payload = {"kind": "used-market-watch-plan", "rule": {k: v for k, v in plan.items() if k != "intent"}, "intent": plan["intent"]}
+    print(json.dumps(payload, ensure_ascii=False, indent=2) if args.json else render_watch_plan(payload))
+    return 0
 
 
 def cmd_watch_add(args: argparse.Namespace) -> int:
@@ -66,22 +97,27 @@ def cmd_watch_add(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_watch_upsert(args: argparse.Namespace) -> int:
+    state = load_state()
+    plan = parse_watch_request(args.request, default_limit=args.limit)
+    rule, created = upsert_rule(state, plan)
+    save_state(state)
+    payload = {"saved": True, "created": created, "rule": rule, "intent": plan["intent"]}
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        status = "등록" if created else "업데이트"
+        print(render_watch_plan({"rule": rule, "intent": plan["intent"]}))
+        print(f"\n{status} 완료")
+    return 0
+
+
 def cmd_watch_list(args: argparse.Namespace) -> int:
     state = load_state()
     if args.json:
         print(json.dumps(state, ensure_ascii=False, indent=2))
         return 0
-    if not state["rules"]:
-        print("등록된 watch rule이 없습니다.")
-        return 0
-    for rule in state["rules"]:
-        lines = [f"- {rule['name']} ({rule['id']}): {rule['query']}"]
-        if rule.get("min_price"):
-            lines.append(f"  · 최소가: {rule['min_price']:,}원")
-        if rule.get("max_price"):
-            lines.append(f"  · 최대가: {rule['max_price']:,}원")
-        lines.append(f"  · 신규={rule.get('notify_on_new')} / 가격하락={rule.get('notify_on_price_drop')}")
-        print("\n".join(lines))
+    print(render_watch_list(state))
     return 0
 
 
@@ -115,6 +151,9 @@ def cmd_watch_check(args: argparse.Namespace) -> int:
     new_events = []
     checked_at = int(time.time())
     for rule in rules:
+        if not rule.get("enabled", True):
+            alerts.append({"rule": rule, "matched_count": 0, "matched": [], "snapshot": {"count": 0, "items": [], "summary": {"total": 0, "by_market": {}}}, "skipped": True})
+            continue
         intent = parse_search_intent(rule["query"], limit=int(rule.get("limit") or 12))
         if rule.get("min_price"):
             intent.min_price = rule["min_price"]
@@ -122,6 +161,7 @@ def cmd_watch_check(args: argparse.Namespace) -> int:
             intent.max_price = rule["max_price"]
         items = [item.to_dict() for item in search_markets(intent)]
         matched = []
+        known = {row.get('dedupe_key') for row in state.get('events', [])[-500:]}
         for item in items:
             prev = last_seen.get(item["article_key"])
             is_new = prev is None
@@ -135,8 +175,8 @@ def cmd_watch_check(args: argparse.Namespace) -> int:
                 alert = _make_alert(rule, item, event_type, prev)
                 matched.append(alert)
                 dedupe_key = f"{rule['id']}::{event_type}::{item['article_key']}::{item.get('price_numeric')}"
-                known = {row.get('dedupe_key') for row in state.get('events', [])[-500:]}
                 if dedupe_key not in known:
+                    known.add(dedupe_key)
                     new_events.append({"dedupe_key": dedupe_key, **alert})
             last_seen[item["article_key"]] = {
                 "rule_id": rule["id"],
@@ -156,14 +196,62 @@ def cmd_watch_check(args: argparse.Namespace) -> int:
     state["events"] = (state.get("events") or []) + new_events
     state["events"] = state["events"][-1000:]
     save_state(state)
+    visible_alerts = [row for row in alerts if row["matched_count"] > 0] if args.alerts_only else alerts
     payload = {
         "kind": "used-market-watch-check",
         "checked_at": checked_at,
         "alert_count": sum(row["matched_count"] for row in alerts),
-        "alerts": alerts,
-        "summary": {"rule_count": len(alerts), "rules_with_matches": sum(1 for row in alerts if row["matched_count"] > 0)},
+        "alerts": visible_alerts,
+        "summary": {
+            "rule_count": len(alerts),
+            "rules_with_matches": sum(1 for row in alerts if row["matched_count"] > 0),
+            "event_counts": _event_counts(new_events),
+        },
     }
     print(json.dumps(payload, ensure_ascii=False, indent=2) if args.json else render_watch_preview(payload))
+    return 0
+
+
+def cmd_watch_events(args: argparse.Namespace) -> int:
+    state = load_state()
+    events = list(state.get("events") or [])
+    if args.name_or_id:
+        rule = find_rule(state, args.name_or_id)
+        target_rule_id = rule.get("id") if rule else args.name_or_id
+        events = [row for row in events if row.get("rule_id") == target_rule_id or row.get("rule_name") == args.name_or_id]
+    events = events[-args.limit:]
+    payload = {"kind": "used-market-watch-events", "count": len(events), "events": events}
+    print(json.dumps(payload, ensure_ascii=False, indent=2) if args.json else render_watch_events(payload))
+    return 0
+
+
+def cmd_watch_enable(args: argparse.Namespace) -> int:
+    state = load_state()
+    rule = set_rule_enabled(state, args.name_or_id, True)
+    if not rule:
+        raise ValueError("해당 watch rule을 찾을 수 없습니다.")
+    save_state(state)
+    print(json.dumps({"updated": True, "rule": rule}, ensure_ascii=False, indent=2) if args.json else f"활성화 완료: {rule['name']}")
+    return 0
+
+
+def cmd_watch_disable(args: argparse.Namespace) -> int:
+    state = load_state()
+    rule = set_rule_enabled(state, args.name_or_id, False)
+    if not rule:
+        raise ValueError("해당 watch rule을 찾을 수 없습니다.")
+    save_state(state)
+    print(json.dumps({"updated": True, "rule": rule}, ensure_ascii=False, indent=2) if args.json else f"비활성화 완료: {rule['name']}")
+    return 0
+
+
+def cmd_watch_remove(args: argparse.Namespace) -> int:
+    state = load_state()
+    rule = remove_rule(state, args.name_or_id)
+    if not rule:
+        raise ValueError("해당 watch rule을 찾을 수 없습니다.")
+    save_state(state)
+    print(json.dumps({"removed": True, "rule": rule}, ensure_ascii=False, indent=2) if args.json else f"삭제 완료: {rule['name']}")
     return 0
 
 
@@ -182,6 +270,12 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--json", action="store_true")
     x.set_defaults(func=cmd_search)
 
+    x = sub.add_parser("watch-plan")
+    x.add_argument("request")
+    x.add_argument("--limit", type=int, default=12)
+    x.add_argument("--json", action="store_true")
+    x.set_defaults(func=cmd_watch_plan)
+
     x = sub.add_parser("watch-add")
     x.add_argument("name")
     x.add_argument("query")
@@ -193,14 +287,42 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--json", action="store_true")
     x.set_defaults(func=cmd_watch_add)
 
+    x = sub.add_parser("watch-upsert")
+    x.add_argument("request")
+    x.add_argument("--limit", type=int, default=12)
+    x.add_argument("--json", action="store_true")
+    x.set_defaults(func=cmd_watch_upsert)
+
     x = sub.add_parser("watch-list")
     x.add_argument("--json", action="store_true")
     x.set_defaults(func=cmd_watch_list)
 
     x = sub.add_parser("watch-check")
     x.add_argument("name_or_id", nargs="?")
+    x.add_argument("--alerts-only", action="store_true")
     x.add_argument("--json", action="store_true")
     x.set_defaults(func=cmd_watch_check)
+
+    x = sub.add_parser("watch-events")
+    x.add_argument("name_or_id", nargs="?")
+    x.add_argument("--limit", type=int, default=10)
+    x.add_argument("--json", action="store_true")
+    x.set_defaults(func=cmd_watch_events)
+
+    x = sub.add_parser("watch-enable")
+    x.add_argument("name_or_id")
+    x.add_argument("--json", action="store_true")
+    x.set_defaults(func=cmd_watch_enable)
+
+    x = sub.add_parser("watch-disable")
+    x.add_argument("name_or_id")
+    x.add_argument("--json", action="store_true")
+    x.set_defaults(func=cmd_watch_disable)
+
+    x = sub.add_parser("watch-remove")
+    x.add_argument("name_or_id")
+    x.add_argument("--json", action="store_true")
+    x.set_defaults(func=cmd_watch_remove)
     return p
 
 

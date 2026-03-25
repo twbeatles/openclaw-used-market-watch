@@ -3,7 +3,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-from used_market_watch import _make_alert, _summarize
+from used_market_watch import _event_counts, _make_alert, _summarize
 
 
 def test_summarize_by_market():
@@ -32,3 +32,12 @@ def test_make_alert_has_previous_fields():
     alert = _make_alert(rule, item, "price_drop", prev)
     assert alert["event_type"] == "price_drop"
     assert alert["previous_price_numeric"] == 120000
+
+
+def test_event_counts_groups_by_type():
+    counts = _event_counts([
+        {"event_type": "new_listing"},
+        {"event_type": "price_drop"},
+        {"event_type": "new_listing"},
+    ])
+    assert counts == {"new_listing": 2, "price_drop": 1}

@@ -20,7 +20,8 @@ LOCATION_HINTS = (
 
 STOPWORDS = {
     "찾아줘", "찾아", "브리핑", "알려줘", "모니터링", "감시", "매물", "중고", "중고매물",
-    "신규", "가격하락", "가격", "제품", "거래", "검색", "해줘", "만", "위주", "만요",
+    "신규", "신규만", "새매물", "새매물만", "가격하락", "가격하락만", "가격", "제품", "거래", "검색",
+    "해줘", "켜줘", "추가", "저장", "등록", "설정", "만", "위주", "만요",
 }
 
 
@@ -81,6 +82,8 @@ def _clean_tokens(tokens: Iterable[str], *, excludes: list[str], markets: list[s
         if not token or token in block:
             continue
         if token.startswith("-") or token.isdigit():
+            continue
+        if re.fullmatch(r"\d+(?:개|건)?", token):
             continue
         if re.fullmatch(r"\d+[만천원]*", token):
             continue
