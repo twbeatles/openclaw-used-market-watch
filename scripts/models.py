@@ -25,6 +25,8 @@ class ListingItem:
     seller: str | None = None
     location: str | None = None
     price_numeric: int | None = None
+    sale_status: str | None = None
+    tags: list[str] = field(default_factory=list)
     meta: dict[str, Any] = field(default_factory=dict)
 
     def parse_price(self) -> int:
@@ -49,6 +51,8 @@ class ListingItem:
             "thumbnail": self.thumbnail,
             "seller": self.seller,
             "location": self.location,
+            "sale_status": self.sale_status,
+            "tags": self.tags,
             "meta": self.meta,
         }
 

@@ -4,7 +4,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 from output_utils import render_integration_plan, render_watch_plan
-from used_market_watch import _event_counts, _get_previous_seen, _last_seen_key, _make_alert, _store_last_seen, _summarize
+from used_market_watch import _event_counts, _get_previous_seen, _last_seen_key, _make_alert, _store_last_seen, _summarize, _tag_counts
 
 
 def test_summarize_by_market():
@@ -94,6 +94,13 @@ def test_render_watch_plan_includes_schedule_and_cron_hint():
     assert "cron 예시:" in text
     assert "권장 실행:" in text
     assert "동작: 브리핑" in text
+
+
+def test_tag_counts_groups_all_tags():
+    assert _tag_counts([
+        {"tags": ["급처", "택포"]},
+        {"tags": ["급처"]},
+    ]) == {"급처": 2, "택포": 1}
 
 
 def test_render_integration_plan_includes_save_and_cron_details():

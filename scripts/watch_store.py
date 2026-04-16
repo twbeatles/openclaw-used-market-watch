@@ -5,9 +5,19 @@ import time
 import uuid
 from typing import Any
 
-from _paths import WATCH_STATE_FILE
+from _paths import WATCH_CONFIG_FILE, WATCH_STATE_FILE
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+
+DEFAULT_CONFIG = {
+    "first_run_skip_notifications": True,
+    "notification_window": {
+        "enabled": False,
+        "start_hour": 8,
+        "end_hour": 23,
+    },
+    "blocked_sellers": [],
+}
 
 
 def _normalize_rule(rule: dict[str, Any]) -> dict[str, Any]:
@@ -15,7 +25,21 @@ def _normalize_rule(rule: dict[str, Any]) -> dict[str, Any]:
     rule.setdefault("action", "watch")
     rule.setdefault("schedule", {"kind": "manual", "label": "수동 또는 상위 스케줄러 연결 필요", "cron": None})
     rule.setdefault("plan_hints", {})
+    rule.setdefault("baseline_established_at", None)
+    rule.setdefault("last_snapshot", None)
     return rule
+
+
+def _normalize_config(config: dict[str, Any] | None) -> dict[str, Any]:
+    payload = dict(DEFAULT_CONFIG)
+    if isinstance(config, dict):
+        payload.update({k: v for k, v in config.items() if k in DEFAULT_CONFIG})
+        window = dict(DEFAULT_CONFIG["notification_window"])
+        if isinstance(config.get("notification_window"), dict):
+            window.update(config["notification_window"])
+        payload["notification_window"] = window
+    payload["blocked_sellers"] = [str(x).strip() for x in (payload.get("blocked_sellers") or []) if str(x).strip()]
+    return payload
 
 
 def load_state() -> dict[str, Any]:
@@ -27,9 +51,23 @@ def load_state() -> dict[str, Any]:
             data.setdefault("events", [])
             data.setdefault("last_seen", {})
             data.setdefault("last_checked_at", None)
+            data.setdefault("config", load_config())
             data["rules"] = [_normalize_rule(rule) for rule in (data.get("rules") or [])]
             return data
-    return {"schema_version": SCHEMA_VERSION, "rules": [], "events": [], "last_seen": {}, "last_checked_at": None}
+    return {"schema_version": SCHEMA_VERSION, "rules": [], "events": [], "last_seen": {}, "last_checked_at": None, "config": load_config()}
+
+
+def load_config() -> dict[str, Any]:
+    if WATCH_CONFIG_FILE.exists():
+        data = json.loads(WATCH_CONFIG_FILE.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return _normalize_config(data)
+    return _normalize_config(None)
+
+
+def save_config(config: dict[str, Any]) -> None:
+    WATCH_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    WATCH_CONFIG_FILE.write_text(json.dumps(_normalize_config(config), ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def save_state(data: dict[str, Any]) -> None:
@@ -53,6 +91,8 @@ def make_rule(*, name: str, query: str, limit: int, min_price: int | None, max_p
         "action": action,
         "schedule": schedule or {"kind": "manual", "label": "수동 또는 상위 스케줄러 연결 필요", "cron": None},
         "plan_hints": plan_hints or {},
+        "baseline_established_at": None,
+        "last_snapshot": None,
         "created_at": now,
         "updated_at": now,
     }
@@ -82,6 +122,8 @@ def upsert_rule(state: dict[str, Any], rule_data: dict[str, Any]) -> tuple[dict[
                 "action": rule_data.get("action") or existing.get("action") or "watch",
                 "schedule": rule_data.get("schedule") or existing.get("schedule") or {"kind": "manual", "label": "수동 또는 상위 스케줄러 연결 필요", "cron": None},
                 "plan_hints": rule_data.get("plan_hints") or existing.get("plan_hints") or {},
+                "baseline_established_at": existing.get("baseline_established_at"),
+                "last_snapshot": existing.get("last_snapshot"),
                 "updated_at": now,
             }
         )

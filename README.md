@@ -22,6 +22,9 @@
 - `watch-plan` 출력에 **실행 주기 / 권장 명령 / cron 예시** 포함
 - 저장된 rule에 **delivery_mode / schedule / plan_hints** 메타 저장
 - 운영자가 `watch-list`만 봐도 **주기와 브리핑/알림 성격**을 바로 확인 가능
+- 첫 baseline 점검에서는 **기준선만 저장하고 즉시 알림을 생략** 가능
+- quiet hours와 **차단 판매자(blocked seller)** 운영 가능
+- 검색 결과에 **auto tag / sale status 메타** 포함
 
 ## 어떤 요청을 잘 받나
 
@@ -134,6 +137,11 @@ python scripts/used_market_watch.py watch-upsert '"잠실 맥북 하락" 맥북 
 ```bash
 python scripts/used_market_watch.py watch-list
 python scripts/used_market_watch.py watch-list --json
+
+python scripts/used_market_watch.py config-show --json
+python scripts/used_market_watch.py block-seller-add 업자계정123
+python scripts/used_market_watch.py block-seller-remove 업자계정123
+python scripts/used_market_watch.py quiet-hours-set 8 23
 ```
 
 ### 7) 실제 점검 실행
@@ -255,6 +263,7 @@ python scripts/used_market_watch.py watch-check "플스5 감시" --json
 - `summary.rule_count`
 - `summary.rules_with_matches`
 - `summary.event_counts`
+- `summary.suppressed_count`
 - `alerts[]`
 
 ### `watch-events`
@@ -264,12 +273,14 @@ python scripts/used_market_watch.py watch-check "플스5 감시" --json
 
 ## watch state schema 메모
 
-`watch-check` 는 로컬 상태를 `data/watch-rules.json` 에 저장합니다. 운영상 중요한 필드는 아래입니다.
+`watch-check` 는 로컬 상태를 `data/watch-rules.json` 에 저장하고, 운영 설정은 `data/watch-config.json` 에 저장합니다. 운영상 중요한 필드는 아래입니다.
 
 - `rules[]`: 저장된 감시 규칙 본문
 - `events[]`: 이미 발행한 신규/가격하락 이벤트 이력
 - `last_checked_at`: 마지막 점검 시각
 - `last_seen`: 최근 본 매물 상태
+- `config.blocked_sellers`: 전역 차단 판매자 목록
+- `config.notification_window`: quiet hours 설정
 
 현재 `last_seen` 설계 포인트:
 - 외부에서 보기에는 `article_key` 기준 최근 상태를 보관
@@ -280,6 +291,8 @@ python scripts/used_market_watch.py watch-check "플스5 감시" --json
 - `events` 는 dedupe 판단에 쓰이므로 임의 삭제 전에 백업 권장
 - schema 변경 시에는 README와 테스트를 같이 갱신하는 편이 안전함
 - 다수 규칙을 운영할수록 `watch-check --alerts-only --json` 을 상위 자동화 레이어에 연결하는 편이 소음이 적음
+- 새 규칙은 첫 실행에서 baseline만 잡고 싶으면 기본 설정을 유지하면 됨
+- 야간 소음을 줄이려면 `quiet-hours-set 8 23` 같은 형태로 알림 창을 정하는 편이 좋음
 
 ## 운영 팁
 
@@ -301,6 +314,7 @@ python -m pytest tests -q
 - 로그인/봇 차단이 강한 경우 결과가 줄 수 있습니다.
 - 중고나라는 메타데이터가 제한적일 수 있습니다.
 - 현재는 Playwright 단일 경로입니다.
+- seller 차단은 seller 메타가 있는 결과에만 정확히 적용됩니다.
 
 ## 설치 / 링크
 

@@ -8,6 +8,7 @@ REFERENCES_DIR = SKILL_DIR / "references"
 DIST_DIR = SKILL_DIR / "dist"
 TESTS_DIR = SKILL_DIR / "tests"
 WATCH_STATE_FILE = DATA_DIR / "watch-rules.json"
+WATCH_CONFIG_FILE = DATA_DIR / "watch-config.json"
 
 for _path in (DATA_DIR, REFERENCES_DIR, DIST_DIR, TESTS_DIR):
     _path.mkdir(parents=True, exist_ok=True)

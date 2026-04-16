@@ -3,7 +3,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-from watch_store import remove_rule, set_rule_enabled, upsert_rule
+from watch_store import _normalize_config, remove_rule, set_rule_enabled, upsert_rule
 
 
 def test_upsert_rule_creates_then_updates_existing_name():
@@ -72,3 +72,14 @@ def test_enable_disable_and_remove_rule():
     removed = remove_rule(state, "rule-1")
     assert removed and removed["name"] == "맥북 감시"
     assert state["rules"] == []
+
+
+def test_normalize_config_keeps_window_and_blocked_sellers_clean():
+    config = _normalize_config({
+        "first_run_skip_notifications": False,
+        "notification_window": {"enabled": True, "start_hour": 9, "end_hour": 22},
+        "blocked_sellers": [" 업자1 ", "", "업자2"],
+    })
+    assert config["first_run_skip_notifications"] is False
+    assert config["notification_window"]["start_hour"] == 9
+    assert config["blocked_sellers"] == ["업자1", "업자2"]

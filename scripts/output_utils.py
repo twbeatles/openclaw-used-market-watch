@@ -44,6 +44,10 @@ def render_search_text(payload: dict[str, Any]) -> str:
             extra.append(item["location"])
         if item.get("seller"):
             extra.append(f"판매자 {item['seller']}")
+        if item.get("sale_status") and item.get("sale_status") != "for_sale":
+            extra.append(f"상태 {item['sale_status']}")
+        if item.get("tags"):
+            extra.append("태그 " + ", ".join(item["tags"]))
         suffix = f" ({' / '.join(extra)})" if extra else ""
         lines.append(f"{idx}. [{label}] {item.get('title')} - {price}{suffix}")
         if item.get("link"):
@@ -57,15 +61,21 @@ def render_watch_preview(payload: dict[str, Any]) -> str:
     if summary.get("event_counts"):
         counts = ", ".join(f"{EVENT_LABELS.get(k, k)}={v}" for k, v in summary["event_counts"].items())
         lines.append(f"- 이벤트 요약: {counts}")
+    if summary.get("suppressed_count"):
+        lines.append(f"- 억제된 알림: {summary['suppressed_count']}건")
     for row in payload.get("alerts") or []:
         rule = row.get("rule") or {}
         schedule = ((rule.get("schedule") or {}).get("label") or "수동")
         mode_label = "브리핑" if rule.get("delivery_mode") == "briefing" else "알림"
         lines.append(f"- {rule.get('name')}: {row.get('matched_count', 0)}건 / {mode_label} / {schedule}")
+        if row.get("suppressed_count"):
+            lines.append(f"  · 억제: {row['suppressed_count']}건")
         for match in (row.get("matched") or [])[:5]:
             badges = [EVENT_LABELS.get(match.get("event_type"), match.get("event_type"))]
             if match.get("previous_price_text"):
                 badges.append(f"이전 {match['previous_price_text']}")
+            if match.get("suppressed_reason"):
+                badges.append(match["suppressed_reason"])
             lines.append(f"  · [{MARKET_LABELS.get(match.get('market'), match.get('market'))}] {match.get('title')} / {match.get('price_text')} ({', '.join([b for b in badges if b])})")
             if match.get("link"):
                 lines.append(f"    - {match['link']}")
@@ -135,6 +145,8 @@ def render_watch_list(state: dict[str, Any]) -> str:
             lines.append(f"  · 최대가: {rule['max_price']:,}원")
         if (rule.get("plan_hints") or {}).get("cron_example"):
             lines.append(f"  · cron 예시: {rule['plan_hints']['cron_example']}")
+        if rule.get("baseline_established_at"):
+            lines.append(f"  · baseline 설정됨: {rule['baseline_established_at']}")
         lines.append(f"  · 누적 이벤트: {event_counts.get(rule['id'], 0)}건")
     return "\n".join(lines)
 

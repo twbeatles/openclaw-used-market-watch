@@ -9,6 +9,49 @@ from urllib.parse import quote
 from models import ListingItem, SearchIntent
 from price_utils import parse_price_kr
 
+AUTO_TAG_RULES = {
+    "급처": ("급처", "급매", "오늘만", "빨리"),
+    "풀박스": ("풀박", "풀박스", "미개봉", "새제품", "미사용"),
+    "네고가능": ("네고", "협의가능", "가격협의"),
+    "택포": ("택포", "배송비포함", "무배"),
+    "직거래": ("직거래", "직거래만"),
+    "정품": ("정품", "보증서", "영수증"),
+}
+
+SALE_STATUS_RULES = {
+    "sold": ("판매완료", "거래완료", "완료"),
+    "reserved": ("예약중", "예약", "보류"),
+}
+
+
+def _extract_tags(text: str) -> list[str]:
+    normalized = str(text or "")
+    tags: list[str] = []
+    for label, tokens in AUTO_TAG_RULES.items():
+        if any(token in normalized for token in tokens):
+            tags.append(label)
+    return tags
+
+
+def _detect_sale_status(text: str) -> str:
+    normalized = str(text or "")
+    for status, tokens in SALE_STATUS_RULES.items():
+        if any(token in normalized for token in tokens):
+            return status
+    return "for_sale"
+
+
+def _attach_meta(item: ListingItem) -> ListingItem:
+    tags = _extract_tags(f"{item.title} {item.location or ''}")
+    item.tags = list(dict.fromkeys(tags))
+    item.sale_status = _detect_sale_status(item.title)
+    item.meta = {
+        **(item.meta or {}),
+        "auto_tags": item.tags,
+        "sale_status": item.sale_status,
+    }
+    return item
+
 
 def _run_async(coro_factory):
     try:
@@ -96,6 +139,7 @@ async def _search_danggeun(page, intent: SearchIntent) -> list[ListingItem]:
                         thumbnail=product.get("image"),
                         location=_location_from_text(description),
                     ))
+                    _attach_meta(items[-1])
                     if len(items) >= intent.limit * 2:
                         return items
             if items:
@@ -119,6 +163,7 @@ async def _search_danggeun(page, intent: SearchIntent) -> list[ListingItem]:
             continue
         price_text = next((line for line in lines[1:] if any(ch.isdigit() for ch in line)), "가격문의")
         items.append(ListingItem("danggeun", _extract_article_id(link), title, price_text, link, intent.raw_query, location=_location_from_text(text)))
+        _attach_meta(items[-1])
     return items
 
 
@@ -150,6 +195,7 @@ async def _search_bunjang(page, intent: SearchIntent) -> list[ListingItem]:
             location = None if "지역정보없음" in compact else line
             break
         items.append(ListingItem("bunjang", pid, title, price_text, f"https://m.bunjang.co.kr/products/{pid}", intent.raw_query, location=location))
+        _attach_meta(items[-1])
     return items
 
 
@@ -176,6 +222,7 @@ async def _search_joonggonara(page, intent: SearchIntent) -> list[ListingItem]:
                 continue
             seen.add(article_id)
             items.append(ListingItem("joonggonara", article_id, title, "가격문의", link, intent.raw_query))
+            _attach_meta(items[-1])
         if items:
             return items
     return items

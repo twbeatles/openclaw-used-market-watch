@@ -20,13 +20,50 @@ from query_parser import parse_search_intent
 from watch_intent import build_integration_bundle, parse_watch_request
 from watch_store import (
     find_rule,
+    load_config,
     load_state,
     make_rule,
     remove_rule,
+    save_config,
     save_state,
     set_rule_enabled,
     upsert_rule,
 )
+
+
+def _blocked_seller_set(config: dict[str, Any]) -> set[str]:
+    return {str(x).strip().lower() for x in (config.get("blocked_sellers") or []) if str(x).strip()}
+
+
+def _is_blocked_seller(item: dict[str, Any], blocked_sellers: set[str]) -> bool:
+    seller = str(item.get("seller") or "").strip().lower()
+    return bool(seller and seller in blocked_sellers)
+
+
+def _notification_window_reason(config: dict[str, Any], checked_at: int) -> str | None:
+    window = (config or {}).get("notification_window") or {}
+    if not window.get("enabled"):
+        return None
+    current_hour = time.localtime(checked_at).tm_hour
+    start_hour = int(window.get("start_hour", 0))
+    end_hour = int(window.get("end_hour", 24))
+    if start_hour == end_hour:
+        return None
+    if start_hour < end_hour:
+        allowed = start_hour <= current_hour < end_hour
+    else:
+        allowed = current_hour >= start_hour or current_hour < end_hour
+    if allowed:
+        return None
+    return f"quiet-hours({start_hour:02d}-{end_hour:02d})"
+
+
+def _tag_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        for tag in row.get("tags") or []:
+            counts[tag] = counts.get(tag, 0) + 1
+    return counts
 
 
 def _summarize(items: list[dict[str, Any]]) -> dict[str, Any]:
@@ -135,6 +172,46 @@ def cmd_watch_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_config_show(args: argparse.Namespace) -> int:
+    config = load_config()
+    print(json.dumps(config, ensure_ascii=False, indent=2) if args.json else json.dumps(config, ensure_ascii=False))
+    return 0
+
+
+def cmd_block_seller_add(args: argparse.Namespace) -> int:
+    config = load_config()
+    blocked = [x for x in (config.get("blocked_sellers") or []) if str(x).strip()]
+    seller = str(args.seller).strip()
+    if seller not in blocked:
+        blocked.append(seller)
+    config["blocked_sellers"] = blocked
+    save_config(config)
+    print(json.dumps({"updated": True, "blocked_sellers": blocked}, ensure_ascii=False, indent=2) if args.json else f"판매자 차단 추가: {seller}")
+    return 0
+
+
+def cmd_block_seller_remove(args: argparse.Namespace) -> int:
+    config = load_config()
+    seller = str(args.seller).strip().lower()
+    blocked = [x for x in (config.get("blocked_sellers") or []) if str(x).strip().lower() != seller]
+    config["blocked_sellers"] = blocked
+    save_config(config)
+    print(json.dumps({"updated": True, "blocked_sellers": blocked}, ensure_ascii=False, indent=2) if args.json else f"판매자 차단 해제: {args.seller}")
+    return 0
+
+
+def cmd_quiet_hours_set(args: argparse.Namespace) -> int:
+    config = load_config()
+    config["notification_window"] = {
+        "enabled": not args.disable,
+        "start_hour": int(args.start_hour),
+        "end_hour": int(args.end_hour),
+    }
+    save_config(config)
+    print(json.dumps(config["notification_window"], ensure_ascii=False, indent=2) if args.json else f"quiet hours 설정: {args.start_hour:02d}-{args.end_hour:02d} / {'비활성' if args.disable else '활성'}")
+    return 0
+
+
 def _make_alert(rule: dict[str, Any], item: dict[str, Any], event_type: str, previous: dict[str, Any] | None) -> dict[str, Any]:
     return {
         "event_type": event_type,
@@ -151,6 +228,8 @@ def _make_alert(rule: dict[str, Any], item: dict[str, Any], event_type: str, pre
         "link": item.get("link"),
         "location": item.get("location"),
         "seller": item.get("seller"),
+        "sale_status": item.get("sale_status"),
+        "tags": item.get("tags") or [],
         "detected_at": int(time.time()),
     }
 
@@ -192,6 +271,10 @@ def _store_last_seen(last_seen: dict[str, Any], rule: dict[str, Any], item: dict
         "price_numeric": item.get("price_numeric"),
         "title": item.get("title"),
         "link": item.get("link"),
+        "location": item.get("location"),
+        "seller": item.get("seller"),
+        "sale_status": item.get("sale_status"),
+        "tags": item.get("tags") or [],
         "last_seen_at": checked_at,
     }
     last_seen[_last_seen_key(rule, item["article_key"])] = payload
@@ -226,13 +309,18 @@ def _compact_last_seen(last_seen: dict[str, Any]) -> None:
 
 def cmd_watch_check(args: argparse.Namespace) -> int:
     state = load_state()
+    state["config"] = load_config()
+    config = state.get("config") or {}
     rules = state.get("rules") or []
     if args.name_or_id:
         rules = [r for r in rules if r["id"] == args.name_or_id or r["name"] == args.name_or_id]
     alerts: list[dict[str, Any]] = []
     last_seen = state.setdefault("last_seen", {})
     new_events = []
+    suppressed_count = 0
     checked_at = int(time.time())
+    quiet_reason = _notification_window_reason(config, checked_at)
+    blocked_sellers = _blocked_seller_set(config)
     for rule in rules:
         if not rule.get("enabled", True):
             alerts.append({"rule": rule, "matched_count": 0, "matched": [], "snapshot": {"count": 0, "items": [], "summary": {"total": 0, "by_market": {}}}, "skipped": True})
@@ -243,8 +331,11 @@ def cmd_watch_check(args: argparse.Namespace) -> int:
         if rule.get("max_price"):
             intent.max_price = rule["max_price"]
         items = _dedupe_watch_items([item.to_dict() for item in search_markets(intent)])
+        items = [item for item in items if not _is_blocked_seller(item, blocked_sellers)]
         matched = []
+        rule_suppressed_count = 0
         known = {row.get('dedupe_key') for row in state.get('events', [])[-500:]}
+        is_baseline_run = bool(config.get("first_run_skip_notifications", True) and not rule.get("baseline_established_at"))
         for item in items:
             prev = _get_previous_seen(last_seen, rule, item["article_key"])
             is_new = prev is None
@@ -256,17 +347,29 @@ def cmd_watch_check(args: argparse.Namespace) -> int:
                 event_type = "price_drop"
             if event_type:
                 alert = _make_alert(rule, item, event_type, prev)
-                matched.append(alert)
-                dedupe_key = f"{rule['id']}::{event_type}::{item['article_key']}::{item.get('price_numeric')}"
-                if dedupe_key not in known:
-                    known.add(dedupe_key)
-                    new_events.append({"dedupe_key": dedupe_key, **alert})
+                if is_baseline_run:
+                    alert["suppressed_reason"] = "baseline"
+                    rule_suppressed_count += 1
+                elif quiet_reason:
+                    alert["suppressed_reason"] = quiet_reason
+                    rule_suppressed_count += 1
+                else:
+                    matched.append(alert)
+                    dedupe_key = f"{rule['id']}::{event_type}::{item['article_key']}::{item.get('price_numeric')}"
+                    if dedupe_key not in known:
+                        known.add(dedupe_key)
+                        new_events.append({"dedupe_key": dedupe_key, **alert})
             _store_last_seen(last_seen, rule, item, checked_at)
+        if is_baseline_run:
+            rule["baseline_established_at"] = checked_at
+        rule["last_snapshot"] = {"checked_at": checked_at, "summary": _summarize(items), "tag_counts": _tag_counts(items), "sample_items": items[:5]}
+        suppressed_count += rule_suppressed_count
         alerts.append({
             "rule": rule,
             "matched_count": len(matched),
             "matched": matched,
-            "snapshot": {"count": len(items), "items": items[:5], "summary": _summarize(items)},
+            "suppressed_count": rule_suppressed_count,
+            "snapshot": {"count": len(items), "items": items[:5], "summary": _summarize(items), "tag_counts": _tag_counts(items)},
         })
     _compact_last_seen(last_seen)
     state["last_checked_at"] = checked_at
@@ -283,6 +386,7 @@ def cmd_watch_check(args: argparse.Namespace) -> int:
             "rule_count": len(alerts),
             "rules_with_matches": sum(1 for row in alerts if row["matched_count"] > 0),
             "event_counts": _event_counts(new_events),
+            "suppressed_count": suppressed_count,
         },
     }
     print(json.dumps(payload, ensure_ascii=False, indent=2) if args.json else render_watch_preview(payload))
@@ -380,6 +484,27 @@ def build_parser() -> argparse.ArgumentParser:
     x = sub.add_parser("watch-list")
     x.add_argument("--json", action="store_true")
     x.set_defaults(func=cmd_watch_list)
+
+    x = sub.add_parser("config-show")
+    x.add_argument("--json", action="store_true")
+    x.set_defaults(func=cmd_config_show)
+
+    x = sub.add_parser("block-seller-add")
+    x.add_argument("seller")
+    x.add_argument("--json", action="store_true")
+    x.set_defaults(func=cmd_block_seller_add)
+
+    x = sub.add_parser("block-seller-remove")
+    x.add_argument("seller")
+    x.add_argument("--json", action="store_true")
+    x.set_defaults(func=cmd_block_seller_remove)
+
+    x = sub.add_parser("quiet-hours-set")
+    x.add_argument("start_hour", type=int)
+    x.add_argument("end_hour", type=int)
+    x.add_argument("--disable", action="store_true")
+    x.add_argument("--json", action="store_true")
+    x.set_defaults(func=cmd_quiet_hours_set)
 
     x = sub.add_parser("watch-check")
     x.add_argument("name_or_id", nargs="?")
