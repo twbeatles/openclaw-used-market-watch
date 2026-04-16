@@ -7,6 +7,7 @@ import re
 from urllib.parse import quote
 
 from models import ListingItem, SearchIntent
+from price_utils import parse_price_kr
 
 
 def _run_async(coro_factory):

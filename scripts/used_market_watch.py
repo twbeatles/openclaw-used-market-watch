@@ -159,19 +159,48 @@ def _last_seen_key(rule: dict[str, Any], article_key: str) -> str:
     return f"{rule['id']}::{article_key}"
 
 
+def _legacy_last_seen_row(last_seen: dict[str, Any], article_key: str) -> dict[str, Any] | None:
+    row = last_seen.get(article_key)
+    if isinstance(row, dict) and "_by_rule" in row:
+        by_rule = row.get("_by_rule") or {}
+        latest = row.get("_latest_rule_id")
+        if latest and isinstance(by_rule.get(latest), dict):
+            return by_rule[latest]
+        for value in by_rule.values():
+            if isinstance(value, dict):
+                return value
+        return None
+    return row if isinstance(row, dict) and "price_numeric" in row else None
+
+
 def _get_previous_seen(last_seen: dict[str, Any], rule: dict[str, Any], article_key: str) -> dict[str, Any] | None:
     scoped_key = _last_seen_key(rule, article_key)
-    return last_seen.get(scoped_key) or last_seen.get(article_key)
+    scoped = last_seen.get(scoped_key)
+    if isinstance(scoped, dict):
+        return scoped
+    row = last_seen.get(article_key)
+    if isinstance(row, dict) and "_by_rule" in row:
+        scoped = (row.get("_by_rule") or {}).get(rule["id"])
+        return scoped if isinstance(scoped, dict) else None
+    return _legacy_last_seen_row(last_seen, article_key)
 
 
 def _store_last_seen(last_seen: dict[str, Any], rule: dict[str, Any], item: dict[str, Any], checked_at: int) -> None:
-    last_seen[_last_seen_key(rule, item["article_key"])] = {
+    payload = {
         "rule_id": rule["id"],
         "price_text": item.get("price_text"),
         "price_numeric": item.get("price_numeric"),
         "title": item.get("title"),
         "link": item.get("link"),
         "last_seen_at": checked_at,
+    }
+    last_seen[_last_seen_key(rule, item["article_key"])] = payload
+    row = last_seen.get(item["article_key"])
+    by_rule = dict(row.get("_by_rule") or {}) if isinstance(row, dict) and "_by_rule" in row else {}
+    by_rule[rule["id"]] = payload
+    last_seen[item["article_key"]] = {
+        "_latest_rule_id": rule["id"],
+        "_by_rule": by_rule,
     }
 
 
@@ -186,6 +215,13 @@ def _dedupe_watch_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         seen_keys.add(dedupe_key)
         deduped.append(item)
     return deduped
+
+
+def _compact_last_seen(last_seen: dict[str, Any]) -> None:
+    for key in [key for key in list(last_seen.keys()) if "::" in key]:
+        article_key = key.split("::", 1)[1]
+        if article_key in last_seen:
+            del last_seen[key]
 
 
 def cmd_watch_check(args: argparse.Namespace) -> int:
@@ -232,6 +268,7 @@ def cmd_watch_check(args: argparse.Namespace) -> int:
             "matched": matched,
             "snapshot": {"count": len(items), "items": items[:5], "summary": _summarize(items)},
         })
+    _compact_last_seen(last_seen)
     state["last_checked_at"] = checked_at
     state["events"] = (state.get("events") or []) + new_events
     state["events"] = state["events"][-1000:]
