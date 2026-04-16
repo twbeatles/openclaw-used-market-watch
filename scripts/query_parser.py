@@ -7,9 +7,9 @@ from models import SUPPORTED_MARKETS, SearchIntent
 from price_utils import parse_price_kr
 
 MARKET_SYNONYMS = {
-    "danggeun": ("당근", "당근마켓", "당근마켓만"),
-    "bunjang": ("번장", "번개", "번개장터"),
-    "joonggonara": ("중고나라", "중나"),
+    "danggeun": ("당근", "당근마켓", "당근마켓만", "당근만"),
+    "bunjang": ("번장", "번장만", "번개", "번개장터", "번개장터만"),
+    "joonggonara": ("중고나라", "중고나라만", "중나"),
 }
 
 LOCATION_HINTS = (
@@ -22,6 +22,8 @@ STOPWORDS = {
     "찾아줘", "찾아", "브리핑", "브리핑해줘", "알려줘", "모니터링", "감시", "감시해줘", "매물", "중고", "중고매물",
     "신규", "신규만", "새매물", "새매물만", "가격하락", "가격하락만", "가격", "제품", "거래", "검색",
     "해줘", "켜줘", "추가", "저장", "등록", "설정", "만", "위주", "만요", "내려가면", "떨어지면", "매일", "아침", "오전", "오후", "저녁", "밤",
+    "포함", "포함해", "포함해서", "이하", "이상", "미만", "초과", "까지", "부터",
+    "매시간", "시간마다", "분마다", "매주", "매월", "계속", "계속해줘",
 }
 
 
@@ -41,13 +43,19 @@ def _extract_excludes(text: str) -> list[str]:
     return list(dict.fromkeys(found))
 
 
+def _normalize_location(value: str) -> str:
+    text = str(value or "").strip()
+    text = re.sub(r"(에서|근처|인근|부근|쪽|쪽에서|에서만)$", "", text)
+    return text.strip()
+
+
 def _extract_location(text: str) -> str | None:
     for hint in LOCATION_HINTS:
         if hint in text:
             m = re.search(rf"({re.escape(hint)}[^\s,/]{{0,12}})", text)
             if m:
-                return m.group(1)
-            return hint
+                return _normalize_location(m.group(1))
+            return _normalize_location(hint)
     return None
 
 
@@ -76,18 +84,24 @@ def _clean_tokens(tokens: Iterable[str], *, excludes: list[str], markets: list[s
         block.update(MARKET_SYNONYMS.get(market, ()))
     if location:
         block.add(location)
+        block.add(_normalize_location(location))
     out: list[str] = []
     for token in tokens:
         token = token.strip().strip('"\'“”‘’')
+        token = _normalize_location(token)
         if not token or token in block:
             continue
-        if token.startswith("-") or token.isdigit():
+        if token.startswith("-"):
             continue
         if re.fullmatch(r"\d+(?:개|건)?", token):
-            continue
-        if re.fullmatch(r"\d+[만천원]*", token):
+            numeric_only = re.sub(r"[^0-9]", "", token)
+            if not numeric_only or len(numeric_only) >= 5:
+                continue
+        if re.fullmatch(r"\d+(?:만|천|원)+", token):
             continue
         if re.fullmatch(r"\d{1,2}시(?:에)?|\d{1,2}:\d{2}", token):
+            continue
+        if re.fullmatch(r"\d+(?:시간|분|일|주|개월|달)마다", token):
             continue
         out.append(token)
     return list(dict.fromkeys(out))
