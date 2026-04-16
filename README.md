@@ -262,6 +262,25 @@ python scripts/used_market_watch.py watch-check "플스5 감시" --json
 - `count`
 - `events[]`
 
+## watch state schema 메모
+
+`watch-check` 는 로컬 상태를 `data/watch-rules.json` 에 저장합니다. 운영상 중요한 필드는 아래입니다.
+
+- `rules[]`: 저장된 감시 규칙 본문
+- `events[]`: 이미 발행한 신규/가격하락 이벤트 이력
+- `last_checked_at`: 마지막 점검 시각
+- `last_seen`: 최근 본 매물 상태
+
+현재 `last_seen` 설계 포인트:
+- 외부에서 보기에는 `article_key` 기준 최근 상태를 보관
+- 내부적으로는 rule별 스코프를 유지해, 같은 매물이라도 규칙마다 신규/가격하락 판단이 섞이지 않게 함
+- 과거 legacy 형태의 단순 `article_key -> payload` 상태도 읽을 수 있게 호환성을 유지함
+
+운영 팁:
+- `events` 는 dedupe 판단에 쓰이므로 임의 삭제 전에 백업 권장
+- schema 변경 시에는 README와 테스트를 같이 갱신하는 편이 안전함
+- 다수 규칙을 운영할수록 `watch-check --alerts-only --json` 을 상위 자동화 레이어에 연결하는 편이 소음이 적음
+
 ## 운영 팁
 
 - 규칙 이름을 고정하려면 큰따옴표로 먼저 이름을 주는 편이 안전합니다.
