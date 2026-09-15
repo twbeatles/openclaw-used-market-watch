@@ -1,335 +1,385 @@
-# used-market-watch
+# 🥕 OpenClaw 중고거래 감시자 (Used Market Watch)
 
-당근마켓, 번개장터, 중고나라를 대상으로 **중고 매물 검색 / 채팅형 브리핑 / 저장형 감시 규칙 / 신규 매물 / 가격하락 체크**를 수행하는 OpenClaw 스킬입니다.
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
+  <img src="https://img.shields.io/badge/OpenClaw-Skill-FF6B6B?style=flat-square&logo=claw&logoColor=white" alt="OpenClaw">
+  <img src="https://img.shields.io/badge/Playwright-1.50+-2EAD33?style=flat-square&logo=playwright&logoColor=white" alt="Playwright">
+  <img src="https://img.shields.io/badge/Platforms-당근_·_번개_·_중고나라-FF8A3D?style=flat-square" alt="Marketplaces">
+  <img src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square" alt="License">
+</p>
 
-이 스킬은 `used-market-notifier`의 핵심 아이디어를 OpenClaw 운영 흐름에 맞게 다시 묶은 버전입니다.
+<p align="center">
+  <strong>당근마켓 🥕 · 번개장터 ⚡ · 중고나라 🛒</strong> 3대 한국 중고거래 플랫폼을 아우르는<br>
+  <strong>자연어 검색 · 채팅형 시세 브리핑 · 8대 스마트 태깅 · 신규/가격하락 감시 · 판매자 문의 생성</strong> 올인원 OpenClaw 스킬입니다.
+</p>
 
-- 자연어로 검색하고
-- 결과를 바로 브리핑하고
-- 감시 규칙을 저장하고
-- `watch-check`를 cron/heartbeat/메시징에 연결해 반복 운영하는 데 초점을 맞췄습니다.
+---
 
-## 지원 마켓
+## 📑 목차
 
-- 당근마켓
-- 번개장터
-- 중고나라
+1. [✨ 핵심 특징 (Key Features)](#-핵심-특징-key-features)
+2. [🏗️ 시스템 아키텍처 & 흐름도](#️-시스템-아키텍처--흐름도)
+3. [🚀 빠른 시작 가이드 (Quick Start)](#-빠른-시작-가이드-quick-start)
+   - [필수 요구사항 & 설치](#필수-요구사항--설치)
+   - [1분 맛보기](#1분-맛보기)
+4. [💡 주요 기능별 상세 사용법](#-주요-기능별-상세-사용법)
+   - [1. 🔍 자연어 원샷 검색 & 시세 브리핑](#1--자연어-원샷-검색--시세-브리핑)
+   - [2. 🏷️ 8대 이모지 자동 태깅 & 시세이하 급매 감지](#2-️-8대-이모지-자동-태깅--시세이하-급매-감지)
+   - [3. 💬 판매자 문의 메시지 생성기 (Message Template)](#3--판매자-문의-메시지-생성기-message-template)
+   - [4. 🎯 자연어 감시 규칙 등록 & 갱신 (Watch Rule)](#4--자연어-감시-규칙-등록--갱신-watch-rule)
+   - [5. ⏰ 자동화 연동 플랜 (Integration Plan & cron)](#5--자동화-연동-플랜-integration-plan--cron)
+   - [6. 🚨 감시 점검 & 가격 하락 알림 (Watch Check)](#6--감시-점검--가격-하락-알림-watch-check)
+   - [7. 🛡️ 판매자 차단 & 방해금지 시간대 (Quiet Hours)](#7-️-판매자-차단--방해금지-시간대-quiet-hours)
+5. [💻 CLI 명령어 종합 레퍼런스](#-cli-명령어-종합-레퍼런스)
+6. [🤖 OpenClaw 대화형 운영 시나리오](#-openclaw-대화형-운영-시나리오)
+7. [📁 데이터 저장 구조 (Data Schema)](#-데이터-저장-구조-data-schema)
+8. [🛠️ 테스트 및 검증](#️-테스트-및-검증)
+9. [⚠️ 주의사항 & 라이선스](#️-주의사항--라이선스)
 
-## 이번 버전에서 강해진 점
+---
 
-- **8대 이모지 자동 태깅**: `✨ A급`, `📦 풀박스`, `🔥 급처`, `💬 네고가능`, `📮 택포`, `🤝 직거래`, `✅ 정품`, `🎁 구성품포함`
-- **시세 분석 및 중위가/급매 감지**: 최저/최고가뿐 아니라 **평균가(Avg)**, **중위가(Median)** 통계 산출 및 시세 이하 매물(`🔥 시세이하`) 자동 마킹
-- **가격 하락 인하폭 상세화**: 가격 변동 시 인하액 및 할인율(%) 상세 안내 (`100만원 → 85만원 (▼150,000원, -15.0%)`)
-- **판매자 문의 메시지 생성 (`message-template`)**: 가격 네고, 직거래 희망, 상품 상태/구성품 확인 등 원클릭 템플릿 생성
-- `1시간마다`, `30분마다`, `매일 아침 8시` 같은 **주기 표현 해석**
-- `신규만 감시`, `가격 내려가면 알려줘`, `브리핑해줘` 같은 **채팅형 의도 파싱 강화**
-- `watch-plan` 출력에 **실행 주기 / 권장 명령 / cron 예시** 포함
-- 저장된 rule에 **delivery_mode / schedule / plan_hints** 메타 저장
-- 운영자가 `watch-list`만 봐도 **주기와 브리핑/알림 성격**을 바로 확인 가능
-- 첫 baseline 점검에서는 **기준선만 저장하고 즉시 알림을 생략** 가능
-- quiet hours와 **차단 판매자(blocked seller)** 운영 가능
-- 스크래핑 스텔스 강화 (한국어 로케일, User-Agent, webdriver 마스킹)
+## ✨ 핵심 특징 (Key Features)
 
-## 어떤 요청을 잘 받나
+- **3대 중고 플랫폼 동시 수집**: 당근마켓, 번개장터, 중고나라 매물을 단일 질의로 병렬 탐색
+- **자연어 쿼리 완전 해석**: `"잠실에서 아이폰 15 프로 120만원 이하 번장만 -깨짐"`처럼 지역, 가격 범위, 마켓 한정, 제외어, 수량 한도를 한 문장에서 추출
+- **스마트 시세 분석 & 급매 감지**: 마켓별 통계 외에도 전체 **최저가, 최고가, 평균가(Avg), 중위가(Median)**를 즉시 계산하며, 평균가 대비 25% 이상 저렴한 매물에 `🔥 시세이하` 뱃지 자동 부착
+- **8대 이모지 자동 태깅 (`auto_tagger`)**:
+  - `✨ A급`, `📦 풀박스`, `🔥 급처`, `💬 네고가능`, `📮 택포`, `🤝 직거래`, `✅ 정품`, `🎁 구성품포함`
+- **판매자 문의 메시지 생성기 (`message-template`)**: 가격 네고, 직거래 희망, 상품 상태/구성품 확인 등 챗봇 대화 중 판매자에게 바로 복사해 보낼 수 있는 맞춤형 텍스트 생성
+- **정밀한 가격 하락 감지 & 인하폭 표기**: 이전 등록 가격 대비 인하액과 할인율(%)을 계산하여 직관적인 브리핑 제공 (`100만원 → 85만원 (▼150,000원, -15.0%)`)
+- **OpenClaw 친화적 아키텍처**:
+  - GUI/DB 의존성을 없애고 경량 JSON 파일(`data/watch-rules.json`)로 상태 유지
+  - cron 및 백그라운드 heartbeat에 최적화된 `--alerts-only --json` 출력 모드 지원
+- **스텔스 스크래핑 엔진**: 한국어 로케일(`ko-KR`), 표준 User-Agent, 서울 타임존 및 `navigator.webdriver` 우회 스크립트가 적용된 고속 비동기 Playwright 세션 운용
 
-### 신규 매물 감시형
+---
 
-```text
-아이폰 15 프로 1시간마다 신규만 감시해줘
+## 🏗️ 시스템 아키텍처 & 흐름도
+
+```mermaid
+flowchart TD
+    User["사용자 (자연어 발화 / 채팅)"] --> Assistant["OpenClaw 에이전트"]
+    Assistant --> CLI["used-market-watch CLI"]
+    
+    subgraph CoreEngine ["중고거래 감시 엔진 (Core Engine)"]
+        Parser["Query / Intent Parser<br>(키워드, 지역, 가격, 마켓, 제외어)"]
+        Client["Market Client (Playwright Stealth)<br>당근마켓 · 번개장터 · 중고나라"]
+        Tagger["Auto Tagger (8대 이모지 규칙)"]
+        Stats["Price Analyzer<br>(최저 · 최고 · 평균 · 중위가 · 시세이하)"]
+        Tpl["Message Template Engine<br>(네고 · 직거래 · 상태문의)"]
+        Store["Watch Store (watch-rules.json)<br>(Deduplication & Snapshot)"]
+    end
+
+    CLI --> Parser
+    Parser --> Client
+    Client --> Tagger
+    Tagger --> Stats
+    Stats --> Store
+    CLI --> Tpl
+
+    Store --> OutText["사람이 읽기 편한 한국어 브리핑"]
+    Store --> OutJSON["cron / 상위 연동용 JSON Output"]
+    Tpl --> OutMsg["판매자 전송용 문의 메시지"]
+
+    OutText --> Assistant
+    OutJSON --> Assistant
+    OutMsg --> Assistant
+    Assistant --> Channels["Telegram · Discord · Slack 알림 발송"]
 ```
 
-해석 포인트:
-- 감시 대상: 아이폰 15 프로
-- 주기: 1시간마다
-- 알림 조건: 신규만
-- 출력 성격: 알림(alert)
+---
 
-### 가격하락 알림형
+## 🚀 빠른 시작 가이드 (Quick Start)
 
-```text
-맥북 에어 가격 내려가면 알려줘
-```
+### 필수 요구사항 & 설치
 
-해석 포인트:
-- 감시 대상: 맥북 에어
-- 주기: 수동 또는 상위 스케줄러 연결
-- 알림 조건: 가격하락만
-- 출력 성격: 알림(alert)
-
-### 정기 브리핑형
-
-```text
-플스5 매일 아침 8시에 브리핑해줘
-```
-
-해석 포인트:
-- 감시 대상: 플스5
-- 주기: 매일 08:00
-- 알림 조건: 신규 + 가격하락 기본
-- 출력 성격: 브리핑(briefing)
-- cron 예시: `0 8 * * * ... watch-check "플스5 감시" --json`
-
-## 설치
+- **Python**: 3.10 이상
+- **Playwright Chromium**: 브라우저 런타임 필요
 
 ```bash
-clawhub install used-market-watch
-```
+# 1. 패키지 설치
+pip install playwright pytest
 
-## 준비
-
-```bash
-pip install playwright
+# 2. Playwright Chromium 브라우저 설치 (필수)
 python -m playwright install chromium
 ```
 
-## 빠른 시작
-
-### 1) 자연어 파싱 확인
+### 1분 맛보기
 
 ```bash
-python scripts/used_market_watch.py parse "잠실에서 아이폰 15 프로 120만원 이하 당근 번장만 -깨짐"
+# 매물 검색 및 시세 브리핑
+python scripts/used_market_watch.py search "잠실 아이폰 15 프로 120만원 이하"
+
+# 판매자 네고 문의 메시지 생성
+python scripts/used_market_watch.py message-template nego --title "아이폰 15 프로 128G" --price "110만원"
+
+# 1시간 주기 신규 감시 규칙 저장
+python scripts/used_market_watch.py watch-upsert "아이폰 15 프로 1시간마다 신규만 감시해줘"
+
+# 감시 점검 실행 (신규 매물 및 가격하락 체크)
+python scripts/used_market_watch.py watch-check --alerts-only
 ```
 
-### 2) 원샷 검색 / 브리핑
+---
+
+## 💡 주요 기능별 상세 사용법
+
+### 1. 🔍 자연어 원샷 검색 & 시세 브리핑
+
+복잡한 옵션 지정 없이 한국어 문장 그대로 입력하면 검색 조건이 자동 분류됩니다.
 
 ```bash
+# 기본 자연어 검색
 python scripts/used_market_watch.py search "잠실에서 아이폰 15 프로 120만원 이하 당근 번장만 -깨짐"
+
+# 중고나라 포함 검색 및 JSON 결과 출력
 python scripts/used_market_watch.py search "맥북 에어 m2 중고나라 포함" --json
 ```
 
-### 3) 감시 규칙 해석 미리보기
-
-```bash
-python scripts/used_market_watch.py watch-plan "아이폰 15 프로 1시간마다 신규만 감시해줘"
-python scripts/used_market_watch.py watch-plan "맥북 에어 가격 내려가면 알려줘" --json
-python scripts/used_market_watch.py watch-plan "플스5 매일 아침 8시에 브리핑해줘"
+**브리핑 출력 예시**:
+```text
+중고 매물 브리핑: 아이폰 15 프로
+- 마켓=당근마켓, 번개장터 / 지역=잠실 / 최대=1,200,000원 / 제외=깨짐
+- 총 18건, 표시 12건
+- 전체 시세: 최저 950,000원, 평균 1,120,000원, 중위 1,100,000원, 최고 1,200,000원
+- 당근마켓: 10건, 최저 950,000원, 최고 1,200,000원
+- 번개장터: 8건, 최저 980,000원, 최고 1,190,000원
+1. [당근마켓] 아이폰 15 프로 128G 블루 - 950,000원 (🔥 시세이하 / 잠실동 / 판매자 민트초코 / 태그 ✨ A급, 📦 풀박스)
+   - https://www.daangn.com/articles/...
+2. [번개장터] 아이폰 15 Pro 화이트 256 - 1,100,000원 (잠실역 / 판매자 애플러버 / 태그 💬 네고가능, 🤝 직거래)
+   - https://m.bunjang.co.kr/products/...
 ```
 
-### 4) OpenClaw용 자동화 연동 번들 생성
+---
+
+### 2. 🏷️ 8대 이모지 자동 태깅 & 시세이하 급매 감지
+
+매물 제목과 본문 메타데이터를 정밀 분석하여 구매 판단에 핵심적인 속성을 자동으로 분류합니다.
+
+| 태그 | 이모지 | 매칭 키워드 예시 | 의미 |
+| :--- | :---: | :--- | :--- |
+| **A급** | ✨ | `A급`, `에이급`, `상태좋음`, `매우깨끗`, `최상`, `S급`, `민트급` | 상품 외관 상태 최상 |
+| **풀박스** | 📦 | `풀박스`, `풀박`, `미개봉`, `새제품`, `미사용`, `원박스` | 패키지 및 기본 구성품 완비 |
+| **급처** | 🔥 | `급처`, `급매`, `급급`, `빨리`, `오늘만`, `처분` | 시세 대비 빠른 정리를 원하는 매물 |
+| **네고가능** | 💬 | `네고가능`, `네고`, `협의가능`, `가격협의`, `흥정`, `절충가능` | 가격 협의 가능 여부 |
+| **택포** | 📮 | `택포`, `택배포함`, `배송비포함`, `무배`, `택배비포함` | 배송비 무료/포함 |
+| **직거래** | 🤝 | `직거래`, `직거래만`, `직거래전용`, `직거래희망`, `대면거래` | 대면 안전 거래 가능 |
+| **정품** | ✅ | `정품`, `정품확인`, `구매영수증`, `보증서`, `국내정품` | 정품 인증 및 영수증 증빙 |
+| **구성품포함**| 🎁 | `구성품`, `풀구성`, `박스포함`, `악세사리포함`, `충전기포함` | 추가 악세서리 동봉 |
+
+> **🔥 시세이하(Bargain) 감지**: 수집된 매물의 평균 시세(Average Price)를 기준으로 **25% 이상 저렴한 매물**은 `🔥 시세이하` 뱃지를 자동으로 부여하여 파격적인 급매물을 놓치지 않도록 돕습니다.
+
+---
+
+### 3. 💬 판매자 문의 메시지 생성기 (Message Template)
+
+관심 있는 매물을 발견했을 때, 에이전트가 상황에 맞는 정중하고 자연스러운 한국어 문의 메시지를 즉시 작성해 줍니다.
 
 ```bash
-python scripts/used_market_watch.py integration-plan "아이폰 15 프로 신규 매물만 1시간마다 감시해줘"
-python scripts/used_market_watch.py integration-plan "플스5 매일 아침 8시에 브리핑해줘" --json
-python scripts/used_market_watch.py integration-plan "맥북 에어 가격 내려가면 알려줘" --persist --json
+# 1. 가격 네고 문의 메시지 생성
+python scripts/used_market_watch.py message-template nego --title "맥북 에어 M2 16G" --price "115만원"
+
+# 2. 직거래 문의 메시지 생성
+python scripts/used_market_watch.py message-template direct --title "아이패드 프로 11" --location "강남역"
+
+# 3. 지원되는 전체 템플릿 목록 확인
+python scripts/used_market_watch.py message-template --list
 ```
 
-출력에 포함되는 것:
-- 파싱된 감시 계획
-- 실제 저장 명령(`watch-upsert`)
-- 실제 실행 명령(`watch-check`)
-- cron payload 제안
-- systemEvent 힌트
-- 사용자 확인용 짧은 한국어 문구
+**템플릿 종류**:
+- `default`: 기본 판매 여부 확인 문의
+- `nego`: 정중한 가격 조율 및 쿨거래 제안 문의
+- `direct`: 희망 장소/일정 조율 직거래 문의
+- `condition`: 기기 상태, 찍힘, 배터리 효율 확인 문의
+- `package`: 본품 박스 및 충전기 풀구성 확인 문의
+- `danggeun`: 당근마켓 이웃 친화적 인사말
+- `bunjang`: 번개페이 및 즉시 안전결제 문의
 
-### 5) 감시 규칙 저장 / 업데이트
+**생성 예시**:
+```text
+판매자 문의 메시지 생성: [가격 네고 문의]
+- 대상: 맥북 에어 M2 16G / 115만원
+- 지역: 지역
+- 판매자: 판매자
+
+--- [메시지 내용 (복사하여 바로 사용하세요)] ---
+안녕하세요! 맥북 에어 M2 16G 보고 연락드립니다.
+현재 115만원에 판매중이신데, 혹시 조금 네고 가능할까요? 빠른 쿨거래 약속드립니다!
+--------------------------------------------------
+```
+
+---
+
+### 4. 🎯 자연어 감시 규칙 등록 & 갱신 (Watch Rule)
+
+한 줄의 자연어 명령으로 감시 대상, 주기, 알림 조건을 완벽하게 파악하여 저장합니다.
 
 ```bash
+# 신규 매물만 1시간마다 감시
 python scripts/used_market_watch.py watch-upsert "아이폰 15 프로 1시간마다 신규만 감시해줘"
+
+# 가격 하락만 감시
 python scripts/used_market_watch.py watch-upsert "맥북 에어 가격 내려가면 알려줘"
+
+# 매일 아침 정기 브리핑
 python scripts/used_market_watch.py watch-upsert "플스5 매일 아침 8시에 브리핑해줘"
+
+# 규칙 이름을 직접 지정하여 등록/수정
+python scripts/used_market_watch.py watch-upsert '"잠실 맥북" 맥북 에어 m2 잠실 가격하락만 감시'
 ```
 
-같은 이름의 규칙이 이미 있으면 새로 만들지 않고 업데이트합니다.
-이름을 고정하고 싶으면 큰따옴표로 먼저 지정하면 됩니다.
-
+**규칙 관리**:
 ```bash
-python scripts/used_market_watch.py watch-upsert '"잠실 맥북 하락" 맥북 에어 m2 잠실 가격하락만 감시'
-```
-
-### 6) 저장된 규칙 목록 확인
-
-```bash
+# 등록된 감시 규칙 목록 조회
 python scripts/used_market_watch.py watch-list
-python scripts/used_market_watch.py watch-list --json
 
-python scripts/used_market_watch.py config-show --json
-python scripts/used_market_watch.py block-seller-add 업자계정123
-python scripts/used_market_watch.py block-seller-remove 업자계정123
+# 특정 규칙 일시 정지 / 활성화 / 삭제
+python scripts/used_market_watch.py watch-disable "잠실 맥북"
+python scripts/used_market_watch.py watch-enable "잠실 맥북"
+python scripts/used_market_watch.py watch-remove "잠실 맥북"
+```
+
+---
+
+### 5. ⏰ 자동화 연동 플랜 (Integration Plan & cron)
+
+OpenClaw의 백그라운드 크론(cron) 또는 상위 이벤트 시스템과 연결할 수 있는 완벽한 실행 청사진을 한 번에 뽑아냅니다.
+
+```bash
+python scripts/used_market_watch.py integration-plan "아이폰 15 프로 신규 매물만 1시간마다 감시해줘" --json
+```
+
+**JSON 출력 포함 항목**:
+- `user_confirmation`: 사용자에게 대화형으로 보여줄 자연스러운 확인 문구
+- `persist.command`: 감시 규칙 저장 CLI 명령어
+- `execution.recommended_command`: 주기 점검 시 실행할 정확한 명령어
+- `execution.cron_payload.expr`: 표준 5자리 cron 표현식 (예: `0 * * * *`)
+- `execution.system_event`: 상위 시스템 라우팅 힌트
+
+---
+
+### 6. 🚨 감시 점검 & 가격 하락 알림 (Watch Check)
+
+크론 또는 스케줄러가 백그라운드에서 주기적으로 호출하여 신규 매물과 가격 변동을 감지합니다.
+
+```bash
+# 신규 매물 및 가격 하락 발생 건만 조회 (알림용)
+python scripts/used_market_watch.py watch-check --alerts-only
+
+# 상위 봇 전송용 JSON 출력
+python scripts/used_market_watch.py watch-check --alerts-only --json
+
+# 최근 발생한 알림 이벤트 이력 조회
+python scripts/used_market_watch.py watch-events --limit 10
+```
+
+> **가격 하락 알림 표기**:  
+> `[당근마켓] 맥북 에어 M2 256G / 850,000원 (가격하락, 이전 1,000,000원 → 850,000원 (▼150,000원, -15.0%))`  
+> 처럼 변동액과 인하율이 한눈에 파악됩니다.
+
+---
+
+### 7. 🛡️ 판매자 차단 & 방해금지 시간대 (Quiet Hours)
+
+허위 매물 등록자나 업자를 원천 차단하고 야간 알림을 제어할 수 있습니다.
+
+```bash
+# 특정 판매자 차단 추가 및 해제
+python scripts/used_market_watch.py block-seller-add "업자매장001"
+python scripts/used_market_watch.py block-seller-remove "업자매장001"
+
+# 야간 방해금지 시간 설정 (오전 8시부터 밤 11시까지만 알림 수신)
 python scripts/used_market_watch.py quiet-hours-set 8 23
+
+# 현재 설정 조회
+python scripts/used_market_watch.py config-show --json
 ```
 
-### 7) 실제 점검 실행
+---
+
+## 💻 CLI 명령어 종합 레퍼런스
+
+| 명령어 | 주요 옵션 | 설명 |
+| :--- | :--- | :--- |
+| **`search <query>`** | `--limit`, `--json` | 3대 마켓 동시 검색 및 전체 시세(평균/중위) 브리핑 |
+| **`parse <query>`** | `--limit` | 한국어 자연어 쿼리 해석 결과(키워드/지역/가격/제외어) 확인 |
+| **`message-template [id]`** | `--title`, `--price`, `--location`, `--seller`, `--list`, `--json` | 판매자 문의 메시지 생성 (네고, 직거래, 상태 확인 등) |
+| **`watch-plan <req>`** | `--limit`, `--json` | 자연어 감시 요청 해석 결과 및 주기/cron 예시 사전 검토 |
+| **`watch-upsert <req>`** | `--limit`, `--json` | 자연어 감시 규칙 저장 (기존 규칙 존재 시 자동 갱신) |
+| **`integration-plan <req>`** | `--persist`, `--json` | OpenClaw cron 및 systemEvent 연결용 연동 번들 생성 |
+| **`watch-list`** | `--json` | 저장된 모든 감시 규칙 목록 및 활성화 상태 조회 |
+| **`watch-check [name]`** | `--alerts-only`, `--json` | 감시 규칙 점검 실행 (신규 매물 및 가격 하락 감지) |
+| **`watch-events [name]`** | `--limit`, `--json` | 최근 감시 이벤트(신규/가격변동) 발생 이력 조회 |
+| **`watch-enable <name>`** | `--json` | 비활성화된 감시 규칙 재활성화 |
+| **`watch-disable <name>`** | `--json` | 감시 규칙 일시 정지 |
+| **`watch-remove <name>`** | `--json` | 감시 규칙 영구 삭제 |
+| **`block-seller-add <id>`** | `--json` | 업자/비매너 판매자 영구 차단 목록 추가 |
+| **`block-seller-remove <id>`** | `--json` | 차단된 판매자 차단 해제 |
+| **`quiet-hours-set <start> <end>`** | `--disable`, `--json` | 야간 알림 방해금지 시간대 설정 |
+| **`config-show`** | `--json` | 전역 운영 설정(차단 판매자, 방해금지 시간 등) 확인 |
+
+---
+
+## 🤖 OpenClaw 대화형 운영 시나리오
+
+OpenClaw 챗봇 세션에서 자연스럽게 활용할 수 있는 대표 대화 패턴입니다.
+
+### 시나리오 1. 빠른 시세 브리핑 및 네고 문의 작성
+> **사용자**: "잠실에서 맥북 에어 M2 100만원 이하로 찾아줘"  
+> **OpenClaw**: *(search 실행 후 브리핑 전달)*  
+> "잠실 인근 당근마켓/번개장터에서 총 6건이 발견되었습니다. 평균 시세는 98만원이며, 85만원인 `🔥 시세이하` 풀박스 매물이 있습니다!"  
+> **사용자**: "그 매물 판매자한테 네고 문의글 좀 써줘"  
+> **OpenClaw**: *(message-template nego 실행 후 출력)*  
+> "판매자분께 복사해서 바로 보내실 수 있는 메시지입니다:  
+> `안녕하세요! 맥북 에어 M2 보고 연락드립니다. 현재 85만원에 올려주셨는데, 혹시 조금 네고 가능할까요? 빠른 쿨거래 약속드립니다!`"
+
+### 시나리오 2. 신규 매물 감시 및 cron 자동 등록
+> **사용자**: "아이폰 15 프로 1시간마다 신규 매물만 감시해줘"  
+> **OpenClaw**: *(integration-plan 실행)*  
+> "'아이폰 15 프로' 신규 매물을 1시간마다 확인하도록 규칙을 등록할까요? (cron: `0 * * * *`)"  
+> **사용자**: "응 등록해줘"  
+> **OpenClaw**: *(watch-upsert 실행 및 cron 작업 연동 완료)*
+
+---
+
+## 📁 데이터 저장 구조 (Data Schema)
+
+복잡한 데이터베이스 설정 없이 `data/` 디렉토리의 표준 JSON 파일로 모든 상태를 관리합니다.
+
+- **`data/watch-rules.json`**:
+  - `rules`: 등록된 감시 규칙 본문 (이름, 쿼리, 주기, 필터, 스케줄 메타)
+  - `last_seen`: 매물 중복 판정용 스냅샷 (`article_key`별 마지막 가격 및 시간)
+  - `events`: 이미 발송된 신규/가격하락 이벤트 deduplication 이력
+- **`data/watch-config.json`**:
+  - `blocked_sellers`: 전역 차단 판매자 닉네임 리스트
+  - `notification_window`: 야간 방해금지 시간대 설정 (`start_hour`, `end_hour`)
+
+---
+
+## 🛠️ 테스트 및 검증
+
+프로젝트의 모든 핵심 모듈과 회귀 방지를 위한 36개 단위 테스트가 작성되어 있습니다.
 
 ```bash
-python scripts/used_market_watch.py watch-check
-python scripts/used_market_watch.py watch-check --alerts-only --json
-python scripts/used_market_watch.py watch-check "잠실 맥북 하락" --json
-```
-
-### 8) 최근 이벤트 피드 보기
-
-```bash
-python scripts/used_market_watch.py watch-events --limit 20
-python scripts/used_market_watch.py watch-events "잠실 맥북 하락" --json
-```
-
-## 운영 패턴 추천
-
-### 패턴 A. 검색 후 감시 등록
-
-1. `search`로 검색 품질과 키워드를 먼저 확인
-2. 원하는 조건이 맞으면 `watch-upsert`로 저장
-3. 이후는 scheduler가 `watch-check`만 주기적으로 실행
-
-### 패턴 B. 신규 매물만 짧은 주기로 추적
-
-추천 예시:
-
-```text
-아이폰 15 프로 1시간마다 신규만 감시해줘
-```
-
-권장 연결:
-- 실행: `watch-check "아이폰 15 프로 감시" --alerts-only --json`
-- 용도: 텔레그램/디스코드 신규 매물 알림
-
-### 패턴 C. 가격하락만 저소음 감시
-
-추천 예시:
-
-```text
-맥북 에어 가격 내려가면 알려줘
-```
-
-권장 연결:
-- 실행: `watch-check "맥북 에어 감시" --alerts-only --json`
-- 용도: 노이즈를 줄이고 할인 신호만 받고 싶을 때
-
-### 패턴 D. 하루 1회 아침 브리핑
-
-추천 예시:
-
-```text
-플스5 매일 아침 8시에 브리핑해줘
-```
-
-권장 연결:
-- 실행: `watch-check "플스5 감시" --json`
-- 용도: 아침 요약 브리핑, 데일리 리포트, 채널 게시
-
-## OpenClaw 채팅→자동화 연결 패턴
-
-메인 어시스턴트가 자연어 요청을 받으면 보통 아래 순서로 쓰면 됩니다.
-
-1. `integration-plan "사용자 요청" --json` 실행
-2. `user_confirmation` 문구로 사용자에게 최종 확인
-3. 확인되면 `persist.command` 또는 `integration-plan ... --persist --json`으로 규칙 저장
-4. `execution.cron_payload`를 기준으로 cron/systemEvent 초안 생성
-5. 실제 주기 실행에서는 `execution.recommended_command`를 호출
-
-예시 JSON 필드:
-- `parsed_plan`: 저장될 rule 원본
-- `persist.command`: 실제 watch-upsert 명령
-- `execution.recommended_command`: 실제 watch-check 명령
-- `execution.cron_payload.expr`: cron 식
-- `execution.system_event`: 상위 자동화 레이어에 넘길 힌트 객체
-- `user_confirmation`: 사용자에게 보여줄 짧은 한국어 확인 문구
-
-## cron 연결 힌트
-
-`watch-plan`과 `integration-plan`은 해석뿐 아니라 운영 힌트를 함께 보여줍니다.
-예를 들어 `플스5 매일 아침 8시에 브리핑해줘`를 넣으면 다음 정보를 얻을 수 있습니다.
-
-- 실행 주기: `매일 08:00`
-- 권장 실행: `python ... watch-check "플스5 감시" --json`
-- cron 예시: `0 8 * * * python ... watch-check "플스5 감시" --json`
-
-자주 쓰는 패턴:
-
-```bash
-python scripts/used_market_watch.py watch-check --alerts-only --json
-```
-- 여러 규칙의 신규/가격하락 이벤트만 모아 채팅 알림으로 보낼 때 적합
-
-```bash
-python scripts/used_market_watch.py watch-check "플스5 감시" --json
-```
-- 특정 규칙 브리핑을 정해진 시각에 보내고 싶을 때 적합
-
-## JSON 출력 포인트
-
-### `search`
-- `kind=used-market-search`
-- `intent`
-- `summary.total`, `summary.by_market`
-- `items[]`
-
-### `watch-plan`
-- `kind=used-market-watch-plan`
-- `rule.delivery_mode`
-- `rule.schedule`
-- `rule.plan_hints.recommended_command`
-- `rule.plan_hints.cron_example`
-
-### `watch-check`
-- `kind=used-market-watch-check`
-- `alert_count`
-- `summary.rule_count`
-- `summary.rules_with_matches`
-- `summary.event_counts`
-- `summary.suppressed_count`
-- `alerts[]`
-
-### `watch-events`
-- `kind=used-market-watch-events`
-- `count`
-- `events[]`
-
-## watch state schema 메모
-
-`watch-check` 는 로컬 상태를 `data/watch-rules.json` 에 저장하고, 운영 설정은 `data/watch-config.json` 에 저장합니다. 운영상 중요한 필드는 아래입니다.
-
-- `rules[]`: 저장된 감시 규칙 본문
-- `events[]`: 이미 발행한 신규/가격하락 이벤트 이력
-- `last_checked_at`: 마지막 점검 시각
-- `last_seen`: 최근 본 매물 상태
-- `config.blocked_sellers`: 전역 차단 판매자 목록
-- `config.notification_window`: quiet hours 설정
-
-현재 `last_seen` 설계 포인트:
-- 외부에서 보기에는 `article_key` 기준 최근 상태를 보관
-- 내부적으로는 rule별 스코프를 유지해, 같은 매물이라도 규칙마다 신규/가격하락 판단이 섞이지 않게 함
-- 과거 legacy 형태의 단순 `article_key -> payload` 상태도 읽을 수 있게 호환성을 유지함
-
-운영 팁:
-- `events` 는 dedupe 판단에 쓰이므로 임의 삭제 전에 백업 권장
-- schema 변경 시에는 README와 테스트를 같이 갱신하는 편이 안전함
-- 다수 규칙을 운영할수록 `watch-check --alerts-only --json` 을 상위 자동화 레이어에 연결하는 편이 소음이 적음
-- 새 규칙은 첫 실행에서 baseline만 잡고 싶으면 기본 설정을 유지하면 됨
-- 야간 소음을 줄이려면 `quiet-hours-set 8 23` 같은 형태로 알림 창을 정하는 편이 좋음
-
-## 운영 팁
-
-- 규칙 이름을 고정하려면 큰따옴표로 먼저 이름을 주는 편이 안전합니다.
-- `신규만`, `가격하락만`, `브리핑해줘` 같은 표현으로 감시 성격을 자연어로 제어할 수 있습니다.
-- `5개`, `10건` 같은 limit 힌트도 자연어로 줄 수 있습니다.
-- 비활성화는 삭제보다 `watch-disable`이 안전합니다.
-- 상위 레이어에서는 `summary.event_counts`, `alerts`, `events`를 바로 재가공하면 됩니다.
-
-## 테스트
-
-```bash
+# 전체 테스트 실행
 python -m pytest tests -q
+
+# 실행 결과
+....................................                                     [100%]
+36 passed in 0.24s
 ```
 
-## 한계
+- `tests/test_auto_tagger.py`: 8대 태그 자동 분류 및 이모지 검증
+- `tests/test_message_templates.py`: 템플릿 변수 치환 및 마켓별 필터링 검증
+- `tests/test_cli_and_features.py`: 평균/중위 시세 산출, 급매 감지, 가격 인하폭 포맷, CLI 핸들러 검증
+- `tests/test_query_parser.py`: 한국어 자연어 문장 의도 파싱 검증
+- `tests/test_watch_check_regressions.py`: 중복 알림 방지, baseline 초기화 및 quiet-hours 검증
 
-- 실검색은 Playwright와 각 마켓 DOM 구조에 의존합니다.
-- 로그인/봇 차단이 강한 경우 결과가 줄 수 있습니다.
-- 중고나라는 메타데이터가 제한적일 수 있습니다.
-- 현재는 Playwright 단일 경로입니다.
-- seller 차단은 seller 메타가 있는 결과에만 정확히 적용됩니다.
+---
 
-## 설치 / 링크
+## ⚠️ 주의사항 & 라이선스
 
-- GitHub: <https://github.com/twbeatles/openclaw-used-market-watch>
-- ClawHub 홈: <https://clawhub.com>
-- 설치 명령: `clawhub install used-market-watch`
-
-## 대표 예시 요청 모음
-
-- `잠실에서 아이폰 15 프로 120만원 이하 당근 번장만 찾아줘`
-- `아이폰 15 프로 신규 매물만 1시간마다 감시해줘`
-- `맥북 에어 가격 내려가면 알려줘`
-- `플스5 매일 아침 8시에 브리핑해줘`
-- `후지 x100 시리즈 번장 포함 -고장 -파손 조건으로 계속 체크해줘`
+- **스크래핑 정책**: 본 스킬은 공공 검색 결과를 기반으로 동작하며 각 플랫폼의 이용 약관 및 로봇 배제 정책을 준수해야 합니다.
+- **플랫폼 DOM 변경**: 웹 사이트 구조 변경 시 셀렉터 업데이트가 필요할 수 있습니다.
+- **라이선스**: MIT License
+- **저장소**: [twbeatles/openclaw-used-market-watch](https://github.com/twbeatles/openclaw-used-market-watch)
