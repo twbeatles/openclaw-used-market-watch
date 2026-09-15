@@ -68,6 +68,7 @@ class SearchIntent:
     max_price: int | None = None
     location: str | None = None
     limit: int = 12
+    exclude_sellers: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -80,4 +81,5 @@ class SearchIntent:
             "max_price": self.max_price,
             "location": self.location,
             "limit": self.limit,
+            "exclude_sellers": self.exclude_sellers,
         }

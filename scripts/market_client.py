@@ -6,31 +6,14 @@ import json
 import re
 from urllib.parse import quote
 
+from auto_tagger import auto_tag
 from models import ListingItem, SearchIntent
 from price_utils import parse_price_kr
-
-AUTO_TAG_RULES = {
-    "급처": ("급처", "급매", "오늘만", "빨리"),
-    "풀박스": ("풀박", "풀박스", "미개봉", "새제품", "미사용"),
-    "네고가능": ("네고", "협의가능", "가격협의"),
-    "택포": ("택포", "배송비포함", "무배"),
-    "직거래": ("직거래", "직거래만"),
-    "정품": ("정품", "보증서", "영수증"),
-}
 
 SALE_STATUS_RULES = {
     "sold": ("판매완료", "거래완료", "완료"),
     "reserved": ("예약중", "예약", "보류"),
 }
-
-
-def _extract_tags(text: str) -> list[str]:
-    normalized = str(text or "")
-    tags: list[str] = []
-    for label, tokens in AUTO_TAG_RULES.items():
-        if any(token in normalized for token in tokens):
-            tags.append(label)
-    return tags
 
 
 def _detect_sale_status(text: str) -> str:
@@ -42,7 +25,7 @@ def _detect_sale_status(text: str) -> str:
 
 
 def _attach_meta(item: ListingItem) -> ListingItem:
-    tags = _extract_tags(f"{item.title} {item.location or ''}")
+    tags = auto_tag(f"{item.title} {item.location or ''}")
     item.tags = list(dict.fromkeys(tags))
     item.sale_status = _detect_sale_status(item.title)
     item.meta = {
@@ -96,6 +79,10 @@ def _passes_filters(item: ListingItem, intent: SearchIntent) -> bool:
     if intent.location and item.market == "danggeun":
         if not item.location or intent.location.lower() not in item.location.lower():
             return False
+    if intent.exclude_sellers and item.seller:
+        seller_lower = item.seller.lower()
+        if any(b.lower() == seller_lower for b in intent.exclude_sellers):
+            return False
     return True
 
 
@@ -129,6 +116,12 @@ async def _search_danggeun(page, intent: SearchIntent) -> list[ListingItem]:
                     raw_price = offers.get("price") if isinstance(offers, dict) else None
                     price_text = f"{int(float(raw_price)):,}원" if raw_price else "가격문의"
                     description = str(product.get("description") or "")
+                    seller = None
+                    seller_node = offers.get("seller") if isinstance(offers, dict) else None
+                    if isinstance(seller_node, dict):
+                        seller = str(seller_node.get("name") or "").strip() or None
+                    elif isinstance(product.get("seller"), dict):
+                        seller = str(product["seller"].get("name") or "").strip() or None
                     items.append(ListingItem(
                         market="danggeun",
                         article_id=_extract_article_id(link),
@@ -137,6 +130,7 @@ async def _search_danggeun(page, intent: SearchIntent) -> list[ListingItem]:
                         link=link,
                         query=intent.raw_query,
                         thumbnail=product.get("image"),
+                        seller=seller,
                         location=_location_from_text(description),
                     ))
                     _attach_meta(items[-1])
@@ -233,7 +227,13 @@ async def _search_async(intent: SearchIntent) -> list[ListingItem]:
 
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=True)
-        context = await browser.new_context()
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            locale="ko-KR",
+            timezone_id="Asia/Seoul",
+            extra_http_headers={"Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8"},
+        )
+        await context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         page = await context.new_page()
         out: list[ListingItem] = []
         try:

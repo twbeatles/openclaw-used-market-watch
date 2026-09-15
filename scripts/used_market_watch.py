@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import statistics
 import sys
 import time
 from typing import Any
 
 from market_client import search_markets
+from message_templates import get_template_manager, render_seller_message
 from models import MARKET_LABELS
 from output_utils import (
     render_integration_plan,
     render_search_text,
+    render_seller_message_text,
     render_watch_events,
     render_watch_list,
     render_watch_plan,
@@ -68,12 +71,22 @@ def _tag_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
 
 def _summarize(items: list[dict[str, Any]]) -> dict[str, Any]:
     by_market: dict[str, dict[str, Any]] = {}
+    all_prices: list[int] = []
     for item in items:
         row = by_market.setdefault(item["market"], {"count": 0, "prices": []})
         row["count"] += 1
-        if item.get("price_numeric"):
-            row["prices"].append(item["price_numeric"])
-    out: dict[str, Any] = {"total": len(items), "by_market": {}}
+        price = item.get("price_numeric")
+        if price:
+            row["prices"].append(price)
+            all_prices.append(price)
+    out: dict[str, Any] = {
+        "total": len(items),
+        "min_price": min(all_prices) if all_prices else None,
+        "max_price": max(all_prices) if all_prices else None,
+        "avg_price": int(sum(all_prices) / len(all_prices)) if all_prices else None,
+        "median_price": int(statistics.median(all_prices)) if all_prices else None,
+        "by_market": {},
+    }
     for market, row in by_market.items():
         prices = row.pop("prices")
         out["by_market"][market] = {
@@ -81,6 +94,12 @@ def _summarize(items: list[dict[str, Any]]) -> dict[str, Any]:
             "min_price": min(prices) if prices else None,
             "max_price": max(prices) if prices else None,
         }
+    if out["avg_price"] and len(all_prices) >= 3:
+        threshold = int(out["avg_price"] * 0.75)
+        for item in items:
+            p = item.get("price_numeric")
+            if p and p <= threshold:
+                item["is_bargain"] = True
     return out
 
 
@@ -436,9 +455,71 @@ def cmd_watch_remove(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_message_template(args: argparse.Namespace) -> int:
+    mgr = get_template_manager()
+    if args.list:
+        templates = mgr.list_templates(args.market)
+        payload = {
+            "kind": "used-market-message-templates",
+            "templates": [
+                {
+                    "id": t.id,
+                    "name": t.name,
+                    "market": t.market,
+                    "description": t.description,
+                    "content": t.content,
+                }
+                for t in templates
+            ],
+        }
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print("지원되는 판매자 문의 템플릿 목록:")
+            for t in templates:
+                print(f"- [{t.id}] {t.name} ({t.market}): {t.description}")
+        return 0
+
+    context = {
+        "title": args.title or "상품",
+        "price": args.price or "판매가",
+        "location": args.location or "지역",
+        "seller": args.seller or "판매자",
+        "target_price": args.target_price or "",
+        "market": args.market or "all",
+    }
+    tpl = mgr.get(args.template)
+    template_name = tpl.name if tpl else args.template
+    rendered = mgr.render(args.template, context)
+    payload = {
+        "kind": "used-market-seller-message",
+        "template_id": args.template,
+        "template_name": template_name,
+        "context": context,
+        "message": rendered,
+    }
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print(render_seller_message_text(payload))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="한국 중고거래 검색/브리핑/watch 스킬")
     sub = p.add_subparsers(dest="cmd", required=True)
+
+    x = sub.add_parser("message-template")
+    x.add_argument("template", nargs="?", default="default", help="템플릿 ID (기본: default, nego, direct, condition, package, danggeun, bunjang 등)")
+    x.add_argument("--title", help="상품명")
+    x.add_argument("--price", help="가격 (예: 100만원)")
+    x.add_argument("--location", help="지역 (예: 잠실, 역삼동)")
+    x.add_argument("--seller", help="판매자명")
+    x.add_argument("--target-price", help="희망 목표가")
+    x.add_argument("--market", choices=["all", "danggeun", "bunjang", "joonggonara"], default="all", help="플랫폼 필터")
+    x.add_argument("--list", action="store_true", help="사용 가능한 템플릿 목록 출력")
+    x.add_argument("--json", action="store_true")
+    x.set_defaults(func=cmd_message_template)
 
     x = sub.add_parser("parse")
     x.add_argument("query")

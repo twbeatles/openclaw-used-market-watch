@@ -1,6 +1,6 @@
 ---
 name: used-market-watch
-description: Search, brief, and monitor Korean used-market listings across 당근마켓, 번개장터, and 중고나라. Use when the user wants 중고 매물 찾아줘, 당근/번장/중고나라 동시 검색, 아이폰/맥북 같은 물건의 신규 매물 감시, 가격하락 체크, 자연어 기반 한국 중고거래 브리핑, 자연어 watch rule 추가/수정, 최근 watch 이벤트 확인, 1시간마다/매일 아침 8시 같은 주기 표현이 포함된 감시 요청, or cron-friendly stdout/JSON monitoring output.
+description: Search, brief, and monitor Korean used-market listings across 당근마켓, 번개장터, and 중고나라. Use when the user wants 중고 매물 찾아줘, 당근/번장/중고나라 동시 검색, 아이폰/맥북 같은 물건의 신규 매물 감시, 가격하락 체크, 판매자 문의/네고 메시지 작성, 자연어 기반 한국 중고거래 브리핑, 자연어 watch rule 추가/수정, 최근 watch 이벤트 확인, 1시간마다/매일 아침 8시 같은 주기 표현이 포함된 감시 요청, or cron-friendly stdout/JSON monitoring output.
 ---
 
 # Used Market Watch
@@ -80,12 +80,23 @@ python skills/used-market-watch/scripts/used_market_watch.py watch-events --limi
 python skills/used-market-watch/scripts/used_market_watch.py watch-events "잠실 맥북 하락" --json
 ```
 
-점검 결과:
-- 신규 매물(`new_listing`)
-- 가격하락(`price_drop`)
-- 각 rule별 snapshot 요약
-- `summary.event_counts` 포함 JSON
-- 최근 이벤트 조회용 `watch-events`
+### 6) 판매자 문의 메시지 생성 (신규)
+```bash
+python skills/used-market-watch/scripts/used_market_watch.py message-template nego --title "아이폰 15 프로" --price "110만원"
+python skills/used-market-watch/scripts/used_market_watch.py message-template direct --title "맥북 에어 M2" --location "잠실역"
+python skills/used-market-watch/scripts/used_market_watch.py message-template --list
+```
+
+동작 특징:
+- `default`(기본), `nego`(가격네고), `direct`(직거래), `condition`(상태확인), `package`(구성품확인), `danggeun`(당근이웃), `bunjang`(번개장터) 템플릿 제공
+- 변수(`{title}`, `{price}`, `{location}`, `{seller}`, `{target_price}`) 자동 치환
+- 챗봇 및 에이전트 대화 시 판매자에게 바로 복사해 보낼 수 있는 메시지 즉시 생성
+
+### 7) 스마트 분석 및 태깅 기능
+- **8대 이모지 자동 태깅**: `✨ A급`, `📦 풀박스`, `🔥 급처`, `💬 네고가능`, `📮 택포`, `🤝 직거래`, `✅ 정품`, `🎁 구성품포함`
+- **시세 분석 및 급매물 감지**: 검색 요약 시 전체 최저/최고가뿐 아니라 **평균가(Avg)** 및 **중위가(Median)** 통계 산출, 시세 대비 25% 이상 저렴한 매물에 `🔥 시세이하` 뱃지 부여
+- **가격 하락 상세화**: `watch-check` 및 `watch-events`에서 가격 인하 발생 시 변동액 및 할인율(%) 명시 (예: `100만원 → 85만원 (▼150,000원, -15.0%)`)
+- **스크래핑 스텔스**: 한국어 로케일(`ko-KR`), 표준 User-Agent, webdriver 감지 우회 적용
 
 ## Runtime notes
 

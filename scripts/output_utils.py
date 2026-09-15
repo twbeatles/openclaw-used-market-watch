@@ -12,6 +12,19 @@ EVENT_LABELS = {
 }
 
 
+def _format_price_change(prev_price_text: str | None, current_price_text: str | None, prev_numeric: int | None = None, curr_numeric: int | None = None) -> str:
+    from price_utils import parse_price_kr
+    p_num = prev_numeric if prev_numeric is not None else parse_price_kr(prev_price_text)
+    c_num = curr_numeric if curr_numeric is not None else parse_price_kr(current_price_text)
+    if p_num and c_num and p_num > c_num:
+        diff = p_num - c_num
+        pct = (diff / p_num) * 100
+        return f"이전 {format_price_kr(p_num)} → {format_price_kr(c_num)} (▼{diff:,}원, -{pct:.1f}%)"
+    if prev_price_text:
+        return f"이전 {prev_price_text}"
+    return ""
+
+
 def render_search_text(payload: dict[str, Any]) -> str:
     intent = payload.get("intent") or {}
     items = payload.get("items") or []
@@ -31,6 +44,9 @@ def render_search_text(payload: dict[str, Any]) -> str:
         lines.append("- " + " / ".join(filters))
     summary = payload.get("summary") or {}
     lines.append(f"- 총 {summary.get('total', 0)}건, 표시 {len(items)}건")
+    if summary.get("avg_price"):
+        med = f", 중위 {format_price_kr(summary['median_price'])}" if summary.get("median_price") else ""
+        lines.append(f"- 전체 시세: 최저 {format_price_kr(summary.get('min_price'))}, 평균 {format_price_kr(summary['avg_price'])}{med}, 최고 {format_price_kr(summary.get('max_price'))}")
     for market, row in (summary.get("by_market") or {}).items():
         lines.append(f"- {MARKET_LABELS.get(market, market)}: {row.get('count', 0)}건, 최저 {format_price_kr(row.get('min_price'))}, 최고 {format_price_kr(row.get('max_price'))}")
     if not items:
@@ -40,6 +56,8 @@ def render_search_text(payload: dict[str, Any]) -> str:
         label = MARKET_LABELS.get(item.get("market"), item.get("market"))
         price = item.get("price_text") or format_price_kr(item.get("price_numeric"))
         extra = []
+        if item.get("is_bargain"):
+            extra.append("🔥 시세이하")
         if item.get("location"):
             extra.append(item["location"])
         if item.get("seller"):
@@ -72,7 +90,9 @@ def render_watch_preview(payload: dict[str, Any]) -> str:
             lines.append(f"  · 억제: {row['suppressed_count']}건")
         for match in (row.get("matched") or [])[:5]:
             badges = [EVENT_LABELS.get(match.get("event_type"), match.get("event_type"))]
-            if match.get("previous_price_text"):
+            if match.get("event_type") == "price_drop" and match.get("previous_price_text"):
+                badges.append(_format_price_change(match["previous_price_text"], match.get("price_text"), match.get("previous_price_numeric"), match.get("price_numeric")))
+            elif match.get("previous_price_text"):
                 badges.append(f"이전 {match['previous_price_text']}")
             if match.get("suppressed_reason"):
                 badges.append(match["suppressed_reason"])
@@ -158,7 +178,9 @@ def render_watch_events(payload: dict[str, Any]) -> str:
     lines = [f"최근 watch 이벤트 {len(events)}건"]
     for event in events:
         badges = [EVENT_LABELS.get(event.get("event_type"), event.get("event_type"))]
-        if event.get("previous_price_text"):
+        if event.get("event_type") == "price_drop" and event.get("previous_price_text"):
+            badges.append(_format_price_change(event["previous_price_text"], event.get("price_text"), event.get("previous_price_numeric"), event.get("price_numeric")))
+        elif event.get("previous_price_text"):
             badges.append(f"이전 {event['previous_price_text']}")
         lines.append(
             f"- {event.get('rule_name')} / [{MARKET_LABELS.get(event.get('market'), event.get('market'))}] {event.get('title')} / {event.get('price_text')} ({', '.join([b for b in badges if b])})"
@@ -187,4 +209,23 @@ def render_integration_plan(payload: dict[str, Any]) -> str:
     if system_event:
         lines.append(f"- systemEvent 힌트: {system_event.get('type')} / rule={system_event.get('rule_name')} / mode={system_event.get('delivery_mode')}")
     lines.append(f"- 운영 요약: {payload.get('operator_summary')}")
+    return "\n".join(lines)
+
+
+def render_seller_message_text(payload: dict[str, Any]) -> str:
+    template_name = payload.get("template_name", "문의 메시지")
+    message = payload.get("message", "")
+    context = payload.get("context") or {}
+    lines = [
+        f"판매자 문의 메시지 생성: [{template_name}]",
+        f"- 대상: {context.get('title', '')} / {context.get('price', '')}",
+    ]
+    if context.get("location"):
+        lines.append(f"- 지역: {context['location']}")
+    if context.get("seller"):
+        lines.append(f"- 판매자: {context['seller']}")
+    lines.append("")
+    lines.append("--- [메시지 내용 (복사하여 바로 사용하세요)] ---")
+    lines.append(message)
+    lines.append("--------------------------------------------------")
     return "\n".join(lines)
