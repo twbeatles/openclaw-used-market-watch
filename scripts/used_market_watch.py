@@ -34,6 +34,18 @@ from watch_store import (
 )
 
 
+def _ensure_utf8_stdout() -> None:
+    """Windows(cp949) 콘솔에서도 이모지 포함 출력이 깨지지 않도록 stdout/stderr를 UTF-8로 전환한다."""
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8", errors="backslashreplace")
+            except Exception:
+                pass
+
+
 def _blocked_seller_set(config: dict[str, Any]) -> set[str]:
     return {str(x).strip().lower() for x in (config.get("blocked_sellers") or []) if str(x).strip()}
 
@@ -617,6 +629,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    _ensure_utf8_stdout()
     parser = build_parser()
     args = parser.parse_args(argv)
     try:

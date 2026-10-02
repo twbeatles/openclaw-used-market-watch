@@ -24,7 +24,28 @@ def _detect_sale_status(text: str) -> str:
     return "for_sale"
 
 
+_TITLE_NOISE = ("새 창 열림", "새창열림")
+_PRICE_HINT = re.compile(r"\d[\d,.]*\s*(만|천|원)")
+
+
+def _clean_title(title: str) -> str:
+    cleaned = str(title or "")
+    for noise in _TITLE_NOISE:
+        cleaned = cleaned.replace(noise, "")
+    return " ".join(cleaned.split())
+
+
+def _price_from_title(title: str | None) -> int:
+    if not title:
+        return 0
+    m = _PRICE_HINT.search(title)
+    if not m:
+        return 0
+    return parse_price_kr(m.group(0))
+
+
 def _attach_meta(item: ListingItem) -> ListingItem:
+    item.title = _clean_title(item.title)
     tags = auto_tag(f"{item.title} {item.location or ''}")
     item.tags = list(dict.fromkeys(tags))
     item.sale_status = _detect_sale_status(item.title)
@@ -141,6 +162,8 @@ async def _search_danggeun(page, intent: SearchIntent) -> list[ListingItem]:
     except Exception:
         pass
     cards = page.locator("a[data-gtm='search_article'][href^='/kr/buy-sell/']")
+    if await cards.count() == 0:
+        cards = page.locator("a[href*='/buy-sell/']")
     count = min(await cards.count(), max(20, intent.limit * 3))
     for i in range(count):
         card = cards.nth(i)
@@ -161,16 +184,23 @@ async def _search_danggeun(page, intent: SearchIntent) -> list[ListingItem]:
     return items
 
 
+def _pid_from_href(href: str | None) -> str:
+    m = re.search(r"/products/(\d+)", href or "")
+    return m.group(1) if m else ""
+
+
 async def _search_bunjang(page, intent: SearchIntent) -> list[ListingItem]:
     url = f"https://m.bunjang.co.kr/search/products?q={quote(intent.keyword)}&order=date"
     await page.goto(url, wait_until="domcontentloaded")
     await page.wait_for_timeout(1200)
     cards = page.locator("a[data-pid]")
+    if await cards.count() == 0:
+        cards = page.locator("a[href*='/products/']")
     items: list[ListingItem] = []
     count = min(await cards.count(), max(20, intent.limit * 3))
     for i in range(count):
         card = cards.nth(i)
-        pid = (await card.get_attribute("data-pid") or "").strip()
+        pid = (await card.get_attribute("data-pid") or "").strip() or _pid_from_href(await card.get_attribute("href"))
         if not pid:
             continue
         text = (await card.inner_text() or "").strip()
@@ -215,11 +245,29 @@ async def _search_joonggonara(page, intent: SearchIntent) -> list[ListingItem]:
             if article_id in seen:
                 continue
             seen.add(article_id)
-            items.append(ListingItem("joonggonara", article_id, title, "가격문의", link, intent.raw_query))
+            guessed = _price_from_title(title)
+            items.append(ListingItem("joonggonara", article_id, title, f"{guessed:,}원" if guessed else "가격문의", link, intent.raw_query))
             _attach_meta(items[-1])
         if items:
             return items
     return items
+
+
+async def _search_one_market(page, market: str, intent: SearchIntent) -> list[ListingItem]:
+    if market == "danggeun":
+        return await _search_danggeun(page, intent)
+    if market == "bunjang":
+        return await _search_bunjang(page, intent)
+    if market == "joonggonara":
+        return await _search_joonggonara(page, intent)
+    return []
+
+
+async def _safe_collect(page, market: str, intent: SearchIntent) -> list[ListingItem]:
+    try:
+        return await _search_one_market(page, market, intent)
+    except Exception:
+        return []
 
 
 async def _search_async(intent: SearchIntent) -> list[ListingItem]:
@@ -239,11 +287,11 @@ async def _search_async(intent: SearchIntent) -> list[ListingItem]:
         try:
             for market in intent.markets:
                 if market == "danggeun":
-                    out.extend(await _search_danggeun(page, intent))
+                    out.extend(await _safe_collect(page, "danggeun", intent))
                 elif market == "bunjang":
-                    out.extend(await _search_bunjang(page, intent))
+                    out.extend(await _safe_collect(page, "bunjang", intent))
                 elif market == "joonggonara":
-                    out.extend(await _search_joonggonara(page, intent))
+                    out.extend(await _safe_collect(page, "joonggonara", intent))
         finally:
             await context.close()
             await browser.close()

@@ -358,7 +358,7 @@ OpenClaw 챗봇 세션에서 자연스럽게 활용할 수 있는 대표 대화 
 
 ## 🛠️ 테스트 및 검증
 
-프로젝트의 모든 핵심 모듈과 회귀 방지를 위한 36개 단위 테스트가 작성되어 있습니다.
+프로젝트의 모든 핵심 모듈과 회귀 방지를 위한 42개 단위 테스트가 작성되어 있습니다.
 
 ```bash
 # 전체 테스트 실행
@@ -366,12 +366,13 @@ python -m pytest tests -q
 
 # 실행 결과
 ....................................                                     [100%]
-36 passed in 0.24s
+42 passed in 0.14s
 ```
 
 - `tests/test_auto_tagger.py`: 8대 태그 자동 분류 및 이모지 검증
 - `tests/test_message_templates.py`: 템플릿 변수 치환 및 마켓별 필터링 검증
-- `tests/test_cli_and_features.py`: 평균/중위 시세 산출, 급매 감지, 가격 인하폭 포맷, CLI 핸들러 검증
+- `tests/test_cli_and_features.py`: 평균/중위 시세 산출, 급매 감지, 가격 인하폭 포맷, CLI 핸들러 검증, Windows(cp949) 콘솔 이모지 출력 검증
+- `tests/test_market_text.py`: 네이버 검색 접미사 제거, 제목 가격 추정(단위 가드), 번개장터 pid 추출, 마켓별 격리 수집 검증
 - `tests/test_query_parser.py`: 한국어 자연어 문장 의도 파싱 검증
 - `tests/test_watch_check_regressions.py`: 중복 알림 방지, baseline 초기화 및 quiet-hours 검증
 
@@ -380,6 +381,6 @@ python -m pytest tests -q
 ## ⚠️ 주의사항 & 라이선스
 
 - **스크래핑 정책**: 본 스킬은 공공 검색 결과를 기반으로 동작하며 각 플랫폼의 이용 약관 및 로봇 배제 정책을 준수해야 합니다.
-- **플랫폼 DOM 변경**: 웹 사이트 구조 변경 시 셀렉터 업데이트가 필요할 수 있습니다.
+- **플랫폼 DOM 변경**: 1차/폴백 셀렉터와 마켓별 격리 수집으로 대응하지만, 구조가 크게 바뀌면 셀렉터 업데이트가 필요할 수 있습니다.
 - **라이선스**: MIT License
 - **저장소**: [twbeatles/openclaw-used-market-watch](https://github.com/twbeatles/openclaw-used-market-watch)

@@ -10,7 +10,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 from output_utils import _format_price_change, render_search_text
-from used_market_watch import _summarize, main
+from used_market_watch import _ensure_utf8_stdout, _summarize, main
 
 
 def test_summarize_avg_median_bargain():
@@ -56,6 +56,16 @@ def test_cli_message_template():
     assert data["template_id"] == "nego"
     assert "맥북 프로 14인치" in data["message"]
     assert "180만원" in data["message"]
+
+
+def test_ensure_utf8_stdout_allows_emoji():
+    buf = io.BytesIO()
+    wrapper = io.TextIOWrapper(buf, encoding="cp949", errors="strict")
+    with patch.object(sys, "stdout", wrapper):
+        _ensure_utf8_stdout()
+        print(json.dumps({"tags": ["📦 풀박스"]}, ensure_ascii=False))
+        wrapper.flush()
+    assert "풀박스" in buf.getvalue().decode("utf-8")
 
 
 def test_cli_message_template_list():
